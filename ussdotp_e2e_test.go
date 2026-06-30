@@ -22,7 +22,7 @@ func TestUssdOtp_Create(t *testing.T) {
 
 	c := newTestClient(t, srv)
 	got, err := c.UssdOtp().Create(context.Background(), CreateUssdOtpParams{
-		PhoneNumber: "076000000",
+		AuthorizedPhoneNumber: "076000000",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -36,9 +36,9 @@ func TestUssdOtp_Create(t *testing.T) {
 	if gotIdem == "" {
 		t.Error("expected Idempotency-Key header")
 	}
-	// body must replicate the TypeScript SDK: it sends phoneNumber.
-	if gotBody["phoneNumber"] != "076000000" {
-		t.Errorf("phoneNumber = %v, want 076000000", gotBody["phoneNumber"])
+	// body must send authorizedPhoneNumber (per the API docs).
+	if gotBody["authorizedPhoneNumber"] != "076000000" {
+		t.Errorf("phoneNumber = %v, want 076000000", gotBody["authorizedPhoneNumber"])
 	}
 }
 
@@ -49,7 +49,7 @@ func TestUssdOtp_Create_ValidationShortCircuits(t *testing.T) {
 	defer srv.Close()
 
 	c := newTestClient(t, srv)
-	_, err := c.UssdOtp().Create(context.Background(), CreateUssdOtpParams{PhoneNumber: ""})
+	_, err := c.UssdOtp().Create(context.Background(), CreateUssdOtpParams{AuthorizedPhoneNumber: ""})
 	if err == nil {
 		t.Fatal("expected validation error")
 	}
