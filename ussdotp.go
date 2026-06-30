@@ -18,10 +18,11 @@ func (c *Client) UssdOtp() *UssdOtpService {
 
 const ussdOtpPath = "/ussd-otps"
 
-// CreateUssdOtpParams holds the inputs for creating a USSD OTP. It mirrors the
-// TypeScript SDK's create request, whose zod schema requires only phoneNumber.
+// CreateUssdOtpParams holds the inputs for creating a USSD OTP. The official
+// docs require authorizedPhoneNumber (the MSISDN authorized to verify the OTP);
+// the TS SDK's older "phoneNumber" field was incorrect and is fixed here.
 type CreateUssdOtpParams struct {
-	PhoneNumber string `validate:"required"`
+	AuthorizedPhoneNumber string `validate:"required"`
 }
 
 // UssdOtp is the one-time passcode session resource returned by the API.
@@ -42,15 +43,15 @@ type UssdOtpList struct {
 	Pagination Pagination `json:"pagination"`
 }
 
-// Create creates a new USSD OTP session. This mirrors the TypeScript SDK, which
-// posts the validated options (phoneNumber) with a generated idempotency key.
+// Create creates a new USSD OTP session, posting the authorized phone number
+// with a generated idempotency key.
 func (s *UssdOtpService) Create(ctx context.Context, params CreateUssdOtpParams) (*UssdOtp, error) {
 	if err := validateStruct(params); err != nil {
 		return nil, err
 	}
 
 	body := map[string]any{
-		"phoneNumber": params.PhoneNumber,
+		"authorizedPhoneNumber": params.AuthorizedPhoneNumber,
 	}
 
 	key, err := generateIdempotencyKey()

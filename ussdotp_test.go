@@ -14,7 +14,7 @@ func TestCreateUssdOtpParams_Validation(t *testing.T) {
 	}{
 		{
 			name:    "valid",
-			params:  CreateUssdOtpParams{PhoneNumber: "076000000"},
+			params:  CreateUssdOtpParams{AuthorizedPhoneNumber: "076000000"},
 			wantErr: false,
 		},
 		{
