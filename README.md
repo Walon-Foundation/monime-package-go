@@ -48,12 +48,8 @@ func main() {
 
 	ctx := context.Background()
 
-	code, err := client.PaymentCode().Create(ctx, monime.CreatePaymentCodeParams{
-		PaymentName: "Order #1234",
-		Amount:      100, // major units; converted to minor units for the API
-		Name:        "Jane Doe",
-		PhoneNumber: "07600000",
-	})
+	// Retrieve a receipt by its order number.
+	receipt, err := client.Receipt().Retrieve(ctx, "your-order-number")
 	if err != nil {
 		var apiErr *monime.Error
 		if errors.As(err, &apiErr) {
@@ -63,7 +59,9 @@ func main() {
 		log.Fatal(err)
 	}
 
-	fmt.Println("USSD code:", code.USSDCode)
+	fmt.Printf("receipt %s: %s (%s %d)\n",
+		receipt.OrderNumber, receipt.Status,
+		receipt.OrderAmount.Currency, receipt.OrderAmount.Value)
 }
 ```
 
@@ -81,6 +79,32 @@ for any unset credential:
 | `WithHTTPClient` | — | no (custom timeouts/transport) |
 
 `New` returns an error if the space id or access token are missing.
+
+### Credentials & `.env`
+
+The SDK reads credentials from **real process environment variables**
+(`os.Getenv`) — it does **not** read a `.env` file itself. You can provide them
+however you like:
+
+```sh
+export MONIME_SPACE_ID=spc-...
+export MONIME_ACCESS_TOKEN=...
+# or inline for a single run:
+MONIME_SPACE_ID=spc-... MONIME_ACCESS_TOKEN=... go run ./examples/receipts
+```
+
+If you prefer to keep credentials in a **`.env` file**, loading it is your
+application's responsibility — the SDK intentionally stays dependency-light and
+doesn't bundle a dotenv loader. Load the file **before** calling `monime.New`,
+for example with [`github.com/joho/godotenv`](https://github.com/joho/godotenv):
+
+```go
+_ = godotenv.Load()          // reads .env into the process environment
+client, err := monime.New()  // then New() picks the values up
+```
+
+Alternatively, pass the values explicitly via `WithSpaceID` / `WithAccessToken`
+and read them from wherever you like (a secrets manager, config, etc.).
 
 ## Resources
 
@@ -157,6 +181,18 @@ if err != nil {
 Monetary values use the `monime.Amount` type (`Currency`, `Value`) where `Value`
 is in **minor units**. Some create helpers (e.g. payment codes) take a major-unit
 amount and convert it for you — see each method's documentation.
+
+## Runnable examples
+
+The [`examples/`](examples) directory has small programs you can run once your
+credentials are in the environment (see [Credentials & `.env`](#credentials--env)):
+
+```sh
+go run ./examples/receipts <order-number>   # retrieve a receipt
+go run ./examples/payment_code              # create a payment code
+go run ./examples/payouts                   # create + list payouts
+go run ./examples/webhooks                  # register + list webhooks
+```
 
 ## Development
 

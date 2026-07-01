@@ -1,5 +1,10 @@
 // Command payouts creates a mobile-money payout and then lists payouts.
 //
+// Credentials are read from the process environment: MONIME_SPACE_ID and
+// MONIME_ACCESS_TOKEN. This SDK reads real OS environment variables — it does
+// NOT parse a .env file. If you keep secrets in a .env file, load it in your app
+// first (e.g. with github.com/joho/godotenv) before calling monime.New.
+//
 //	MONIME_SPACE_ID=... MONIME_ACCESS_TOKEN=... go run ./examples/payouts
 package main
 
