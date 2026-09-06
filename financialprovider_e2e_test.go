@@ -42,20 +42,24 @@ func TestBank_Retrieve_RequiresID(t *testing.T) {
 }
 
 func TestBank_List(t *testing.T) {
-	var gotMethod, gotPath string
+	var gotMethod, gotPath, gotCountry string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotMethod, gotPath = r.Method, r.URL.Path
+		gotCountry = r.URL.Query().Get("country")
 		_, _ = w.Write([]byte(`{"result":[{"providerId":"bank_1"},{"providerId":"bank_2"}],"pagination":{"count":2,"next":"cur"}}`))
 	}))
 	defer srv.Close()
 
 	c := newTestClient(t, srv)
-	got, err := c.FinancialProvider().Bank().List(context.Background())
+	got, err := c.FinancialProvider().Bank().List(context.Background(), "sl")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if gotMethod != http.MethodGet || gotPath != "/banks" {
 		t.Fatalf("method/path = %s %s", gotMethod, gotPath)
+	}
+	if gotCountry != "SL" {
+		t.Errorf("country = %q, want SL (uppercased)", gotCountry)
 	}
 	if len(got.Result) != 2 || got.Pagination.Count != 2 || got.Pagination.Next != "cur" {
 		t.Fatalf("unexpected list: %+v", got)
@@ -94,22 +98,39 @@ func TestMomo_Retrieve_RequiresID(t *testing.T) {
 }
 
 func TestMomo_List(t *testing.T) {
-	var gotMethod, gotPath string
+	var gotMethod, gotPath, gotCountry string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotMethod, gotPath = r.Method, r.URL.Path
+		gotCountry = r.URL.Query().Get("country")
 		_, _ = w.Write([]byte(`{"result":[{"providerId":"momo_1"},{"providerId":"momo_2"},{"providerId":"momo_3"}],"pagination":{"count":3,"next":""}}`))
 	}))
 	defer srv.Close()
 
 	c := newTestClient(t, srv)
-	got, err := c.FinancialProvider().Momo().List(context.Background())
+	got, err := c.FinancialProvider().Momo().List(context.Background(), "sl")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if gotMethod != http.MethodGet || gotPath != "/momos" {
 		t.Fatalf("method/path = %s %s", gotMethod, gotPath)
 	}
+	if gotCountry != "SL" {
+		t.Errorf("country = %q, want SL (uppercased)", gotCountry)
+	}
 	if len(got.Result) != 3 || got.Pagination.Count != 3 {
 		t.Fatalf("unexpected list: %+v", got)
+	}
+}
+
+func TestBank_List_RequiresCountry(t *testing.T) {
+	c := newTestClient(t, httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Error("request should not be sent without a country")
+	})))
+
+	if _, err := c.FinancialProvider().Bank().List(context.Background(), ""); err == nil {
+		t.Fatal("expected error for missing country")
+	}
+	if _, err := c.FinancialProvider().Momo().List(context.Background(), "SLE"); err == nil {
+		t.Fatal("expected error for non alpha-2 country")
 	}
 }
