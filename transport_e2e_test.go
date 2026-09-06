@@ -207,3 +207,24 @@ func TestDo_NetworkError(t *testing.T) {
 		t.Fatal("expected network error")
 	}
 }
+
+func TestDo_PrefersMonimeRequestIDHeader(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Monime-Request-Id", "mon-req-1")
+		w.Header().Set("x-request-id", "legacy")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	err := c.do(context.Background(), requestOptions{method: http.MethodGet, path: "/x", out: &sampleResult{}})
+
+	var apiErr *Error
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("expected *Error, got %T", err)
+	}
+	if apiErr.RequestID != "mon-req-1" {
+		t.Fatalf("requestID = %q, want mon-req-1", apiErr.RequestID)
+	}
+}

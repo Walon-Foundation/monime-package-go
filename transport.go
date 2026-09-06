@@ -60,7 +60,7 @@ func (c *Client) do(ctx context.Context, opts requestOptions) error {
 	}
 	defer res.Body.Close()
 
-	requestID := res.Header.Get("x-request-id")
+	requestID := requestIDOf(res)
 
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		return parseError(res, requestID)
@@ -92,6 +92,15 @@ func (c *Client) do(ctx context.Context, opts requestOptions) error {
 		return &Error{Message: fmt.Sprintf("failed to decode response: %v", err), RequestID: requestID}
 	}
 	return nil
+}
+
+// requestIDOf reads the request id Monime returns for tracing. The documented
+// header is Monime-Request-Id; x-request-id is accepted as a fallback.
+func requestIDOf(res *http.Response) string {
+	if id := res.Header.Get("Monime-Request-Id"); id != "" {
+		return id
+	}
+	return res.Header.Get("x-request-id")
 }
 
 // parseError converts a non-2xx response into a typed error.
