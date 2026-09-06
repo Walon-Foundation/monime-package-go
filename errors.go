@@ -13,14 +13,24 @@ import "fmt"
 //		log.Printf("status=%d request=%s", apiErr.Status, apiErr.RequestID)
 //	}
 type Error struct {
-	Message   string
-	Status    int
+	Message string
+	Status  int
+
+	// Code and Reason come from the API error envelope. Reason is the
+	// machine-readable identifier to branch on, e.g. "idempotency_key_in_use"
+	// or "too_many_requests"; both are zero when the body was not enveloped.
+	Code   int
+	Reason string
+
 	RequestID string
 	Details   any
 }
 
 func (e *Error) Error() string {
-	if e.Status != 0 {
+	switch {
+	case e.Status != 0 && e.Reason != "":
+		return fmt.Sprintf("monime: %s (status %d, %s)", e.Message, e.Status, e.Reason)
+	case e.Status != 0:
 		return fmt.Sprintf("monime: %s (status %d)", e.Message, e.Status)
 	}
 	return "monime: " + e.Message

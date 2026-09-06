@@ -228,3 +228,39 @@ func TestDo_PrefersMonimeRequestIDHeader(t *testing.T) {
 		t.Fatalf("requestID = %q, want mon-req-1", apiErr.RequestID)
 	}
 }
+
+func TestDo_ParsesErrorEnvelope(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Monime-Request-Id", "req-409")
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"success":false,"messages":[],"error":{"code":409,` +
+			`"reason":"idempotency_key_in_use",` +
+			`"message":"Conflict: Idempotency key reused with a non-identical request.",` +
+			`"details":["dup"]}}`))
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	err := c.do(context.Background(), requestOptions{method: http.MethodPost, path: "/x", out: &sampleResult{}})
+
+	var apiErr *Error
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("expected *Error, got %T", err)
+	}
+	if apiErr.Message != "Conflict: Idempotency key reused with a non-identical request." {
+		t.Errorf("message = %q", apiErr.Message)
+	}
+	if apiErr.Reason != "idempotency_key_in_use" {
+		t.Errorf("reason = %q", apiErr.Reason)
+	}
+	if apiErr.Code != 409 || apiErr.Status != http.StatusConflict {
+		t.Errorf("code/status = %d/%d", apiErr.Code, apiErr.Status)
+	}
+	if apiErr.RequestID != "req-409" {
+		t.Errorf("requestID = %q", apiErr.RequestID)
+	}
+	details, ok := apiErr.Details.([]any)
+	if !ok || len(details) != 1 || details[0] != "dup" {
+		t.Errorf("details = %#v, want the envelope's error.details", apiErr.Details)
+	}
+}

@@ -103,30 +103,53 @@ func requestIDOf(res *http.Response) string {
 	return res.Header.Get("x-request-id")
 }
 
+// errorEnvelope is the error body Monime returns across all endpoints:
+//
+//	{"success": false, "messages": [], "error": {"code", "reason", "message", "details"}}
+type errorEnvelope struct {
+	Error struct {
+		Code    int    `json:"code"`
+		Reason  string `json:"reason"`
+		Message string `json:"message"`
+		Details any    `json:"details"`
+	} `json:"error"`
+
+	// Message catches error bodies that are not wrapped in the envelope, such
+	// as those produced by a proxy in front of the API.
+	Message string `json:"message"`
+}
+
 // parseError converts a non-2xx response into a typed error.
 func parseError(res *http.Response, requestID string) error {
 	body, _ := io.ReadAll(res.Body)
 
-	message := fmt.Sprintf("request failed with status %d", res.StatusCode)
-	var details any
-	if len(body) > 0 {
-		var parsed struct {
-			Message string `json:"message"`
-		}
-		if json.Unmarshal(body, &parsed) == nil && parsed.Message != "" {
-			message = parsed.Message
-		}
-		var raw any
-		if json.Unmarshal(body, &raw) == nil {
-			details = raw
-		}
-	}
-
 	base := &Error{
-		Message:   message,
+		Message:   fmt.Sprintf("request failed with status %d", res.StatusCode),
 		Status:    res.StatusCode,
 		RequestID: requestID,
-		Details:   details,
+	}
+
+	if len(body) > 0 {
+		var env errorEnvelope
+		if json.Unmarshal(body, &env) == nil {
+			switch {
+			case env.Error.Message != "":
+				base.Message = env.Error.Message
+			case env.Message != "":
+				base.Message = env.Message
+			}
+			base.Code = env.Error.Code
+			base.Reason = env.Error.Reason
+			base.Details = env.Error.Details
+		}
+		if base.Details == nil {
+			// Not the documented envelope: keep the whole body as details so
+			// nothing is lost.
+			var raw any
+			if json.Unmarshal(body, &raw) == nil {
+				base.Details = raw
+			}
+		}
 	}
 
 	if res.StatusCode == http.StatusUnauthorized {
