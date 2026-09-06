@@ -1,6 +1,9 @@
 package monime
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 // Error is the base error type returned for any failed Monime API request.
 // It carries the HTTP status, the request id (from the x-request-id header),
@@ -54,6 +57,24 @@ type ValidationError struct {
 
 func (e *ValidationError) Error() string { return e.Err.Error() }
 func (e *ValidationError) Unwrap() error { return e.Err }
+
+// RateLimitError is returned when the API responds with 429. RetryAfter is the
+// delay the API asked for (from the Retry-After header, zero when absent) and
+// Limit is the dimension that was tripped: "token-limit", "space-limit" or
+// "endpoint-limit". It unwraps to its underlying *Error.
+//
+//	var rateErr *monime.RateLimitError
+//	if errors.As(err, &rateErr) {
+//		time.Sleep(rateErr.RetryAfter)
+//	}
+type RateLimitError struct {
+	Err        *Error
+	RetryAfter time.Duration
+	Limit      string
+}
+
+func (e *RateLimitError) Error() string { return e.Err.Error() }
+func (e *RateLimitError) Unwrap() error { return e.Err }
 
 func newValidationError(message string) *ValidationError {
 	return &ValidationError{&Error{Message: message, Status: 400}}

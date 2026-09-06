@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
+	"time"
 )
 
 // requestOptions describes a single API call made through Client.do.
@@ -119,7 +121,8 @@ type errorEnvelope struct {
 	Message string `json:"message"`
 }
 
-// parseError converts a non-2xx response into a typed error.
+// parseError converts a non-2xx response into a typed error: *RateLimitError
+// for 429, *AuthenticationError for 401, and *Error otherwise.
 func parseError(res *http.Response, requestID string) error {
 	body, _ := io.ReadAll(res.Body)
 
@@ -152,8 +155,21 @@ func parseError(res *http.Response, requestID string) error {
 		}
 	}
 
-	if res.StatusCode == http.StatusUnauthorized {
+	switch res.StatusCode {
+	case http.StatusUnauthorized:
 		return newAuthenticationError(base)
+	case http.StatusTooManyRequests:
+		return newRateLimitError(base, res.Header)
 	}
 	return base
+}
+
+// newRateLimitError decorates a 429 with its Retry-After delay and the
+// Monime-Rate-Limit dimension that was tripped.
+func newRateLimitError(base *Error, header http.Header) *RateLimitError {
+	err := &RateLimitError{Err: base, Limit: header.Get("Monime-Rate-Limit")}
+	if seconds, convErr := strconv.Atoi(header.Get("Retry-After")); convErr == nil && seconds > 0 {
+		err.RetryAfter = time.Duration(seconds) * time.Second
+	}
+	return err
 }

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 // newTestClient returns a Client pointed at srv with dummy credentials.
@@ -262,5 +263,56 @@ func TestDo_ParsesErrorEnvelope(t *testing.T) {
 	details, ok := apiErr.Details.([]any)
 	if !ok || len(details) != 1 || details[0] != "dup" {
 		t.Errorf("details = %#v, want the envelope's error.details", apiErr.Details)
+	}
+}
+
+func TestDo_RateLimitError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Retry-After", "3")
+		w.Header().Set("Monime-Rate-Limit", "endpoint-limit")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"success":false,"messages":[],"error":{"code":429,` +
+			`"reason":"too_many_requests","message":"Too many requests sent in a short period","details":[]}}`))
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	err := c.do(context.Background(), requestOptions{method: http.MethodGet, path: "/x", out: &sampleResult{}})
+
+	var rateErr *RateLimitError
+	if !errors.As(err, &rateErr) {
+		t.Fatalf("expected *RateLimitError, got %T (%v)", err, err)
+	}
+	if rateErr.RetryAfter != 3*time.Second {
+		t.Errorf("retryAfter = %v, want 3s", rateErr.RetryAfter)
+	}
+	if rateErr.Limit != "endpoint-limit" {
+		t.Errorf("limit = %q", rateErr.Limit)
+	}
+
+	var apiErr *Error
+	if !errors.As(err, &apiErr) {
+		t.Fatal("RateLimitError should unwrap to *Error")
+	}
+	if apiErr.Reason != "too_many_requests" || apiErr.Status != http.StatusTooManyRequests {
+		t.Errorf("unwrapped = %+v", apiErr)
+	}
+}
+
+func TestDo_RateLimitErrorWithoutRetryAfter(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	err := c.do(context.Background(), requestOptions{method: http.MethodGet, path: "/x", out: &sampleResult{}})
+
+	var rateErr *RateLimitError
+	if !errors.As(err, &rateErr) {
+		t.Fatalf("expected *RateLimitError, got %T", err)
+	}
+	if rateErr.RetryAfter != 0 {
+		t.Errorf("retryAfter = %v, want 0 when the header is absent", rateErr.RetryAfter)
 	}
 }
