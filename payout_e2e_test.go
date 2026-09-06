@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 )
 
@@ -229,5 +230,53 @@ func TestPayout_Delete_RequiresID(t *testing.T) {
 	c := newTestClient(t, httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
 	if err := c.Payout().Delete(context.Background(), ""); err == nil {
 		t.Fatal("expected error for empty id")
+	}
+}
+
+func TestPayout_List_PagingAndFilters(t *testing.T) {
+	var gotQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.Query()
+		_, _ = w.Write([]byte(`{"success":true,"result":[{"id":"po_1"}],` +
+			`"pagination":{"count":1,"total":37,"next":"cur-2"}}`))
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	got, err := c.Payout().List(context.Background(),
+		WithLimit(50),
+		WithAfter("cur-1"),
+		WithPayoutStatus("pending"),
+		WithPayoutSourceAccount("fac-1"),
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	want := map[string]string{
+		"limit":                    "50",
+		"after":                    "cur-1",
+		"status":                   "pending",
+		"sourceFinancialAccountId": "fac-1",
+	}
+	for key, value := range want {
+		if gotQuery.Get(key) != value {
+			t.Errorf("query %s = %q, want %q", key, gotQuery.Get(key), value)
+		}
+	}
+	if got.Pagination.Next != "cur-2" || got.Pagination.Count != 1 || got.Pagination.Total != 37 {
+		t.Fatalf("pagination = %+v", got.Pagination)
+	}
+}
+
+func TestPayout_List_InvalidOptionSkipsRequest(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Error("request should not be sent when an option fails validation")
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	if _, err := c.Payout().List(context.Background(), WithLimit(100)); err == nil {
+		t.Fatal("expected a validation error for limit=100")
 	}
 }

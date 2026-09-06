@@ -151,12 +151,20 @@ func (s *PaymentCodeService) Retrieve(ctx context.Context, paymentCodeID string)
 	return &out, nil
 }
 
-// List returns all payment codes.
-func (s *PaymentCodeService) List(ctx context.Context) (*PaymentCodeList, error) {
+// List returns a page of payment codes. Use WithLimit and WithAfter to page
+// through the collection, and WithPaymentCodeStatus, WithPaymentCodeMode or
+// WithPaymentCodeUssdCode to narrow it.
+func (s *PaymentCodeService) List(ctx context.Context, opts ...ListOption) (*PaymentCodeList, error) {
+	query, err := buildListQuery(opts)
+	if err != nil {
+		return nil, err
+	}
+
 	var out PaymentCodeList
 	if err := s.client.do(ctx, requestOptions{
 		method:  http.MethodGet,
 		path:    paymentCodePath,
+		query:   query,
 		out:     &out,
 		rawBody: true,
 	}); err != nil {

@@ -117,12 +117,20 @@ func (s *FinancialAccountService) Retrieve(ctx context.Context, financialAccount
 	return &out, nil
 }
 
-// List returns all financial accounts.
-func (s *FinancialAccountService) List(ctx context.Context) (*FinancialAccountList, error) {
+// List returns a page of financial accounts. Use WithLimit and WithAfter to
+// page through the collection, and WithFinancialAccountUvan,
+// WithFinancialAccountReference or WithFinancialAccountBalance to narrow it.
+func (s *FinancialAccountService) List(ctx context.Context, opts ...ListOption) (*FinancialAccountList, error) {
+	query, err := buildListQuery(opts)
+	if err != nil {
+		return nil, err
+	}
+
 	var out FinancialAccountList
 	if err := s.client.do(ctx, requestOptions{
 		method:  http.MethodGet,
 		path:    financialAccountPath,
+		query:   query,
 		out:     &out,
 		rawBody: true,
 	}); err != nil {

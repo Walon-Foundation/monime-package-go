@@ -81,12 +81,20 @@ func (s *PaymentService) Retrieve(ctx context.Context, paymentID string) (*Payme
 	return &out, nil
 }
 
-// List returns all payments.
-func (s *PaymentService) List(ctx context.Context) (*PaymentList, error) {
+// List returns a page of payments. Use WithLimit and WithAfter to page through
+// the collection, and WithPaymentOrderNumber, WithPaymentFinancialAccountID or
+// WithPaymentFinancialTransactionReference to narrow it.
+func (s *PaymentService) List(ctx context.Context, opts ...ListOption) (*PaymentList, error) {
+	query, err := buildListQuery(opts)
+	if err != nil {
+		return nil, err
+	}
+
 	var out PaymentList
 	if err := s.client.do(ctx, requestOptions{
 		method:  http.MethodGet,
 		path:    paymentPath,
+		query:   query,
 		out:     &out,
 		rawBody: true,
 	}); err != nil {

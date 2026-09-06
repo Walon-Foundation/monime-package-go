@@ -160,12 +160,21 @@ func (s *PayoutService) Retrieve(ctx context.Context, payoutID string) (*Payout,
 	return &out, nil
 }
 
-// List returns all payouts.
-func (s *PayoutService) List(ctx context.Context) (*PayoutList, error) {
+// List returns a page of payouts. Use WithLimit and WithAfter to page through
+// the collection, and WithPayoutStatus, WithPayoutSourceAccount,
+// WithPayoutSourceTransactionReference or
+// WithPayoutDestinationTransactionReference to narrow it.
+func (s *PayoutService) List(ctx context.Context, opts ...ListOption) (*PayoutList, error) {
+	query, err := buildListQuery(opts)
+	if err != nil {
+		return nil, err
+	}
+
 	var out PayoutList
 	if err := s.client.do(ctx, requestOptions{
 		method:  http.MethodGet,
 		path:    payoutPath,
+		query:   query,
 		out:     &out,
 		rawBody: true,
 	}); err != nil {

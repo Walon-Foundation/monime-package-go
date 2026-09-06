@@ -118,12 +118,21 @@ func (s *InternalTransferService) Create(ctx context.Context, params CreateInter
 	return &out, nil
 }
 
-// List returns all internal transfers.
-func (s *InternalTransferService) List(ctx context.Context) (*InternalTransferList, error) {
+// List returns a page of internal transfers. Use WithLimit and WithAfter to
+// page through the collection, and WithInternalTransferStatus,
+// WithInternalTransferSourceAccount, WithInternalTransferDestinationAccount or
+// WithInternalTransferTransactionReference to narrow it.
+func (s *InternalTransferService) List(ctx context.Context, opts ...ListOption) (*InternalTransferList, error) {
+	query, err := buildListQuery(opts)
+	if err != nil {
+		return nil, err
+	}
+
 	var out InternalTransferList
 	if err := s.client.do(ctx, requestOptions{
 		method:  http.MethodGet,
 		path:    internalTransferPath,
+		query:   query,
 		out:     &out,
 		rawBody: true,
 	}); err != nil {

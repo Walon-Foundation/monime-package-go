@@ -89,13 +89,20 @@ func (s *UssdOtpService) Retrieve(ctx context.Context, ussdOtpID string) (*UssdO
 	return &out, nil
 }
 
-// List returns all USSD OTP sessions. This endpoint is net-new relative to the
-// TypeScript SDK (added from the Monime API docs).
-func (s *UssdOtpService) List(ctx context.Context) (*UssdOtpList, error) {
+// List returns a page of USSD OTP sessions. Use WithLimit and WithAfter to page
+// through the collection. This endpoint is net-new relative to the TypeScript
+// SDK (added from the Monime API docs).
+func (s *UssdOtpService) List(ctx context.Context, opts ...ListOption) (*UssdOtpList, error) {
+	query, err := buildListQuery(opts)
+	if err != nil {
+		return nil, err
+	}
+
 	var out UssdOtpList
 	if err := s.client.do(ctx, requestOptions{
 		method:  http.MethodGet,
 		path:    ussdOtpPath,
+		query:   query,
 		out:     &out,
 		rawBody: true,
 	}); err != nil {

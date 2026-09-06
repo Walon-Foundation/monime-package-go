@@ -117,12 +117,19 @@ func (s *WebhookService) Retrieve(ctx context.Context, webhookID string) (*Webho
 	return &out, nil
 }
 
-// List returns all webhooks.
-func (s *WebhookService) List(ctx context.Context) (*WebhookList, error) {
+// List returns a page of webhooks. Use WithLimit and WithAfter to page through
+// the collection.
+func (s *WebhookService) List(ctx context.Context, opts ...ListOption) (*WebhookList, error) {
+	query, err := buildListQuery(opts)
+	if err != nil {
+		return nil, err
+	}
+
 	var out WebhookList
 	if err := s.client.do(ctx, requestOptions{
 		method:  http.MethodGet,
 		path:    webhookPath,
+		query:   query,
 		out:     &out,
 		rawBody: true,
 	}); err != nil {
