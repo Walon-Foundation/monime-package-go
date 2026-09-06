@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 )
@@ -314,5 +315,52 @@ func TestDo_RateLimitErrorWithoutRetryAfter(t *testing.T) {
 	}
 	if rateErr.RetryAfter != 0 {
 		t.Errorf("retryAfter = %v, want 0 when the header is absent", rateErr.RetryAfter)
+	}
+}
+
+func TestDo_EncodesQueryParameters(t *testing.T) {
+	var gotRawQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotRawQuery = r.URL.RawQuery
+		_, _ = w.Write([]byte(`{"result":{"id":"1"}}`))
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	var out sampleResult
+	err := c.do(context.Background(), requestOptions{
+		method: http.MethodGet,
+		path:   "/x",
+		query:  url.Values{"limit": {"25"}, "after": {"cur sor"}},
+		out:    &out,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotRawQuery != "after=cur+sor&limit=25" {
+		t.Fatalf("raw query = %q", gotRawQuery)
+	}
+}
+
+func TestDo_OmitsEmptyQuery(t *testing.T) {
+	var gotURL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotURL = r.URL.String()
+		_, _ = w.Write([]byte(`{"result":{"id":"1"}}`))
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	var out sampleResult
+	if err := c.do(context.Background(), requestOptions{
+		method: http.MethodGet,
+		path:   "/x",
+		query:  url.Values{},
+		out:    &out,
+	}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotURL != "/x" {
+		t.Fatalf("url = %q, want /x with no trailing ?", gotURL)
 	}
 }

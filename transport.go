@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 )
@@ -15,9 +16,10 @@ import (
 type requestOptions struct {
 	method         string
 	path           string
-	body           any    // marshalled to JSON when non-nil
-	idempotencyKey string // set on the Idempotency-Key header when non-empty
-	out            any    // pointer the response is decoded into; may be nil
+	query          url.Values // appended to the URL when non-empty
+	body           any        // marshalled to JSON when non-nil
+	idempotencyKey string     // set on the Idempotency-Key header when non-empty
+	out            any        // pointer the response is decoded into; may be nil
 
 	// rawBody controls how the success body is decoded into out. Monime wraps
 	// responses as {"success", "messages", "result", "pagination"}. For
@@ -41,7 +43,12 @@ func (c *Client) do(ctx context.Context, opts requestOptions) error {
 		bodyReader = bytes.NewReader(encoded)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, opts.method, c.baseURL+opts.path, bodyReader)
+	endpoint := c.baseURL + opts.path
+	if len(opts.query) > 0 {
+		endpoint += "?" + opts.query.Encode()
+	}
+
+	req, err := http.NewRequestWithContext(ctx, opts.method, endpoint, bodyReader)
 	if err != nil {
 		return &Error{Message: err.Error()}
 	}
