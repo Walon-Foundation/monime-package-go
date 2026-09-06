@@ -90,3 +90,137 @@ func WithLimit(limit int) ListOption {
 func WithAfter(cursor string) ListOption {
 	return func(q *listQuery) { q.set("after", cursor) }
 }
+
+// --- Payment code ---------------------------------------------------------
+
+// WithPaymentCodeUssdCode filters payment codes by their assigned USSD code.
+func WithPaymentCodeUssdCode(ussdCode string) ListOption {
+	return func(q *listQuery) { q.set("ussd_code", ussdCode) }
+}
+
+// WithPaymentCodeMode filters payment codes by usage mode: "one_time" or
+// "recurrent".
+func WithPaymentCodeMode(mode string) ListOption {
+	return func(q *listQuery) { q.setEnum("mode", mode, "one_time", "recurrent") }
+}
+
+// WithPaymentCodeStatus filters payment codes by status: "pending",
+// "cancelled", "processing", "expired" or "completed".
+func WithPaymentCodeStatus(status string) ListOption {
+	return func(q *listQuery) {
+		q.setEnum("status", status, "pending", "cancelled", "processing", "expired", "completed")
+	}
+}
+
+// --- Payment --------------------------------------------------------------
+
+// WithPaymentOrderNumber filters payments by order number.
+func WithPaymentOrderNumber(orderNumber string) ListOption {
+	return func(q *listQuery) { q.set("orderNumber", orderNumber) }
+}
+
+// WithPaymentFinancialAccountID filters payments by the credited financial
+// account.
+func WithPaymentFinancialAccountID(accountID string) ListOption {
+	return func(q *listQuery) { q.set("financialAccountId", accountID) }
+}
+
+// WithPaymentFinancialTransactionReference filters payments by the reference
+// grouping their financial transactions.
+func WithPaymentFinancialTransactionReference(reference string) ListOption {
+	return func(q *listQuery) { q.set("financialTransactionReference", reference) }
+}
+
+// --- Payout ---------------------------------------------------------------
+
+// WithPayoutStatus filters payouts by status: "pending", "processing",
+// "failed" or "completed".
+func WithPayoutStatus(status string) ListOption {
+	return func(q *listQuery) {
+		q.setEnum("status", status, "pending", "processing", "failed", "completed")
+	}
+}
+
+// WithPayoutSourceAccount filters payouts by the originating financial account.
+func WithPayoutSourceAccount(accountID string) ListOption {
+	return func(q *listQuery) { q.set("sourceFinancialAccountId", accountID) }
+}
+
+// WithPayoutSourceTransactionReference filters payouts by the reference of the
+// transactions debited from the source account.
+func WithPayoutSourceTransactionReference(reference string) ListOption {
+	return func(q *listQuery) { q.set("sourceTransactionReference", reference) }
+}
+
+// WithPayoutDestinationTransactionReference filters payouts by the reference
+// assigned at the destination provider.
+func WithPayoutDestinationTransactionReference(reference string) ListOption {
+	return func(q *listQuery) { q.set("destinationTransactionReference", reference) }
+}
+
+// --- Financial account ----------------------------------------------------
+
+// WithFinancialAccountUvan filters financial accounts by Universal Virtual
+// Account Number.
+func WithFinancialAccountUvan(uvan string) ListOption {
+	return func(q *listQuery) { q.set("uvan", uvan) }
+}
+
+// WithFinancialAccountReference filters financial accounts by the external
+// reference linking them to your own system.
+func WithFinancialAccountReference(reference string) ListOption {
+	return func(q *listQuery) { q.set("reference", reference) }
+}
+
+// WithFinancialAccountBalance asks the API to include each account's balance in
+// the response.
+func WithFinancialAccountBalance(withBalance bool) ListOption {
+	return func(q *listQuery) { q.values.Set("withBalance", strconv.FormatBool(withBalance)) }
+}
+
+// --- Financial transaction ------------------------------------------------
+
+// WithFinancialTransactionAccountID filters transactions by financial account.
+func WithFinancialTransactionAccountID(accountID string) ListOption {
+	return func(q *listQuery) { q.set("financialAccountId", accountID) }
+}
+
+// WithFinancialTransactionReference filters transactions by the
+// Monime-assigned reference that groups them.
+func WithFinancialTransactionReference(reference string) ListOption {
+	return func(q *listQuery) { q.set("reference", reference) }
+}
+
+// WithFinancialTransactionType filters transactions by direction: "credit" for
+// incoming funds, "debit" for outgoing.
+func WithFinancialTransactionType(transactionType string) ListOption {
+	return func(q *listQuery) { q.setEnum("type", transactionType, "credit", "debit") }
+}
+
+// --- Internal transfer ----------------------------------------------------
+
+// WithInternalTransferStatus filters internal transfers by status: "pending",
+// "processing", "failed" or "completed".
+func WithInternalTransferStatus(status string) ListOption {
+	return func(q *listQuery) {
+		q.setEnum("status", status, "pending", "processing", "failed", "completed")
+	}
+}
+
+// WithInternalTransferSourceAccount filters internal transfers by the debited
+// financial account.
+func WithInternalTransferSourceAccount(accountID string) ListOption {
+	return func(q *listQuery) { q.set("sourceFinancialAccountId", accountID) }
+}
+
+// WithInternalTransferDestinationAccount filters internal transfers by the
+// credited financial account.
+func WithInternalTransferDestinationAccount(accountID string) ListOption {
+	return func(q *listQuery) { q.set("destinationFinancialAccountId", accountID) }
+}
+
+// WithInternalTransferTransactionReference filters internal transfers by the
+// reference grouping their financial transactions.
+func WithInternalTransferTransactionReference(reference string) ListOption {
+	return func(q *listQuery) { q.set("financialTransactionReference", reference) }
+}
