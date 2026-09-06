@@ -38,12 +38,29 @@ func main() {
 	}
 	fmt.Printf("created payout %s (%s)\n", payout.ID, payout.Status)
 
-	list, err := client.Payout().List(ctx)
-	if err != nil {
-		log.Fatalf("list payouts: %v", err)
+	// Page through every pending payout. An empty Pagination.Next means the
+	// last page; WithAfter ignores an empty cursor, so the first call needs no
+	// special casing.
+	cursor := ""
+	total := 0
+	for {
+		list, err := client.Payout().List(ctx,
+			monime.WithLimit(50),
+			monime.WithAfter(cursor),
+			monime.WithPayoutStatus("pending"),
+		)
+		if err != nil {
+			log.Fatalf("list payouts: %v", err)
+		}
+		for _, p := range list.Result {
+			fmt.Printf("  - %s %s\n", p.ID, p.Status)
+		}
+		total += len(list.Result)
+
+		if list.Pagination.Next == "" {
+			break
+		}
+		cursor = list.Pagination.Next
 	}
-	fmt.Printf("you have %d payout(s)\n", len(list.Result))
-	for _, p := range list.Result {
-		fmt.Printf("  - %s %s\n", p.ID, p.Status)
-	}
+	fmt.Printf("you have %d pending payout(s)\n", total)
 }

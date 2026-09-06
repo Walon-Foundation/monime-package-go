@@ -123,9 +123,10 @@ takes a `context.Context` first.
 | `client.Receipt()` | `Retrieve`, `Redeem` |
 | `client.UssdOtp()` | `Create`, `Retrieve`, `List`, `Delete` |
 | `client.ProviderKyc()` | `Retrieve` |
+| `client.Country()` | `Retrieve`, `List` |
 | `client.Webhook()` | `Create`, `Retrieve`, `List`, `Update`, `Delete` |
-| `client.FinancialProvider().Bank()` | `Retrieve`, `List` |
-| `client.FinancialProvider().Momo()` | `Retrieve`, `List` |
+| `client.FinancialProvider().Bank()` | `Retrieve`, `List` (country required) |
+| `client.FinancialProvider().Momo()` | `Retrieve`, `List` (country required) |
 
 ### Examples
 
@@ -144,19 +145,75 @@ _, err = client.PaymentCode().Update(ctx, "pmc-123", map[string]any{
 	"enable": false,
 })
 
-// Financial providers are grouped
-banks, err := client.FinancialProvider().Bank().List(ctx)
+// Financial providers are grouped, and the API requires a country
+// (ISO 3166-1 alpha-2)
+banks, err := client.FinancialProvider().Bank().List(ctx, "SL")
 
 // Delete returns just an error
 err = client.CheckoutSession().Delete(ctx, "chs-123")
 ```
 
+## Pagination and filtering
+
+Every `List` takes optional `ListOption`s. `WithLimit` (1–50, the API defaults
+to 10) and `WithAfter` work on every resource; resource-prefixed options filter
+a specific one.
+
+```go
+payouts, err := client.Payout().List(ctx,
+	monime.WithLimit(50),
+	monime.WithPayoutStatus("pending"),
+	monime.WithPayoutSourceAccount("fac-123"),
+)
+```
+
+Lists are cursor-paginated. `Pagination.Next` is the cursor for the following
+page and is empty on the last one; `WithAfter` ignores an empty cursor, so the
+first request needs no special case:
+
+```go
+cursor := ""
+for {
+	page, err := client.Payment().List(ctx, monime.WithLimit(50), monime.WithAfter(cursor))
+	if err != nil {
+		return err
+	}
+	for _, p := range page.Result {
+		fmt.Println(p.ID)
+	}
+	if page.Pagination.Next == "" {
+		break
+	}
+	cursor = page.Pagination.Next
+}
+```
+
+Options are validated locally, so an out-of-range `WithLimit` or an unknown
+status returns a `*ValidationError` before any request is sent.
+
+| Resource | Filter options |
+| --- | --- |
+| `Payment` | `WithPaymentOrderNumber`, `WithPaymentFinancialAccountID`, `WithPaymentFinancialTransactionReference` |
+| `PaymentCode` | `WithPaymentCodeStatus`, `WithPaymentCodeMode`, `WithPaymentCodeUssdCode` |
+| `Payout` | `WithPayoutStatus`, `WithPayoutSourceAccount`, `WithPayoutSourceTransactionReference`, `WithPayoutDestinationTransactionReference` |
+| `FinancialAccount` | `WithFinancialAccountUvan`, `WithFinancialAccountReference`, `WithFinancialAccountBalance` |
+| `FinancialTransaction` | `WithFinancialTransactionAccountID`, `WithFinancialTransactionReference`, `WithFinancialTransactionType` |
+| `InternalTransfer` | `WithInternalTransferStatus`, `WithInternalTransferSourceAccount`, `WithInternalTransferDestinationAccount`, `WithInternalTransferTransactionReference` |
+
+`CheckoutSession`, `Country`, `UssdOtp` and `Webhook` take paging options only.
+`Bank` and `Momo` take a required country argument plus paging options.
+
 ## Errors
 
 Every method returns `(*Response, error)`. Errors are typed:
 
-- `*monime.Error` — base API error carrying `Status`, `RequestID`, and `Details`.
+- `*monime.Error` — base API error carrying `Status`, `Code`, `Reason`,
+  `RequestID`, and `Details`. `Reason` is the machine-readable identifier from
+  the API (e.g. `idempotency_key_in_use`).
 - `*monime.AuthenticationError` — returned on `401`; unwraps to `*monime.Error`.
+- `*monime.RateLimitError` — returned on `429`, carrying `RetryAfter` and the
+  `Limit` dimension that was tripped (`token-limit`, `space-limit`,
+  `endpoint-limit`); unwraps to `*monime.Error`.
 - `*monime.ValidationError` — returned when input fails local validation before
   any network call; unwraps to `*monime.Error`.
 
@@ -164,10 +221,13 @@ Every method returns `(*Response, error)`. Errors are typed:
 resp, err := client.Payment().Retrieve(ctx, id)
 if err != nil {
 	var authErr *monime.AuthenticationError
+	var rateErr *monime.RateLimitError
 	var apiErr *monime.Error
 	switch {
 	case errors.As(err, &authErr):
 		// invalid/expired token
+	case errors.As(err, &rateErr):
+		time.Sleep(rateErr.RetryAfter) // honour the Retry-After header
 	case errors.As(err, &apiErr):
 		log.Printf("status=%d request=%s", apiErr.Status, apiErr.RequestID)
 	default:

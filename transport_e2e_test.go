@@ -5,7 +5,9 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
+	"time"
 )
 
 // newTestClient returns a Client pointed at srv with dummy credentials.
@@ -205,5 +207,160 @@ func TestDo_NetworkError(t *testing.T) {
 	err = c.do(context.Background(), requestOptions{method: http.MethodGet, path: "/x", out: &sampleResult{}})
 	if err == nil {
 		t.Fatal("expected network error")
+	}
+}
+
+func TestDo_PrefersMonimeRequestIDHeader(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Monime-Request-Id", "mon-req-1")
+		w.Header().Set("x-request-id", "legacy")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	err := c.do(context.Background(), requestOptions{method: http.MethodGet, path: "/x", out: &sampleResult{}})
+
+	var apiErr *Error
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("expected *Error, got %T", err)
+	}
+	if apiErr.RequestID != "mon-req-1" {
+		t.Fatalf("requestID = %q, want mon-req-1", apiErr.RequestID)
+	}
+}
+
+func TestDo_ParsesErrorEnvelope(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Monime-Request-Id", "req-409")
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"success":false,"messages":[],"error":{"code":409,` +
+			`"reason":"idempotency_key_in_use",` +
+			`"message":"Conflict: Idempotency key reused with a non-identical request.",` +
+			`"details":["dup"]}}`))
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	err := c.do(context.Background(), requestOptions{method: http.MethodPost, path: "/x", out: &sampleResult{}})
+
+	var apiErr *Error
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("expected *Error, got %T", err)
+	}
+	if apiErr.Message != "Conflict: Idempotency key reused with a non-identical request." {
+		t.Errorf("message = %q", apiErr.Message)
+	}
+	if apiErr.Reason != "idempotency_key_in_use" {
+		t.Errorf("reason = %q", apiErr.Reason)
+	}
+	if apiErr.Code != 409 || apiErr.Status != http.StatusConflict {
+		t.Errorf("code/status = %d/%d", apiErr.Code, apiErr.Status)
+	}
+	if apiErr.RequestID != "req-409" {
+		t.Errorf("requestID = %q", apiErr.RequestID)
+	}
+	details, ok := apiErr.Details.([]any)
+	if !ok || len(details) != 1 || details[0] != "dup" {
+		t.Errorf("details = %#v, want the envelope's error.details", apiErr.Details)
+	}
+}
+
+func TestDo_RateLimitError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Retry-After", "3")
+		w.Header().Set("Monime-Rate-Limit", "endpoint-limit")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"success":false,"messages":[],"error":{"code":429,` +
+			`"reason":"too_many_requests","message":"Too many requests sent in a short period","details":[]}}`))
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	err := c.do(context.Background(), requestOptions{method: http.MethodGet, path: "/x", out: &sampleResult{}})
+
+	var rateErr *RateLimitError
+	if !errors.As(err, &rateErr) {
+		t.Fatalf("expected *RateLimitError, got %T (%v)", err, err)
+	}
+	if rateErr.RetryAfter != 3*time.Second {
+		t.Errorf("retryAfter = %v, want 3s", rateErr.RetryAfter)
+	}
+	if rateErr.Limit != "endpoint-limit" {
+		t.Errorf("limit = %q", rateErr.Limit)
+	}
+
+	var apiErr *Error
+	if !errors.As(err, &apiErr) {
+		t.Fatal("RateLimitError should unwrap to *Error")
+	}
+	if apiErr.Reason != "too_many_requests" || apiErr.Status != http.StatusTooManyRequests {
+		t.Errorf("unwrapped = %+v", apiErr)
+	}
+}
+
+func TestDo_RateLimitErrorWithoutRetryAfter(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	err := c.do(context.Background(), requestOptions{method: http.MethodGet, path: "/x", out: &sampleResult{}})
+
+	var rateErr *RateLimitError
+	if !errors.As(err, &rateErr) {
+		t.Fatalf("expected *RateLimitError, got %T", err)
+	}
+	if rateErr.RetryAfter != 0 {
+		t.Errorf("retryAfter = %v, want 0 when the header is absent", rateErr.RetryAfter)
+	}
+}
+
+func TestDo_EncodesQueryParameters(t *testing.T) {
+	var gotRawQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotRawQuery = r.URL.RawQuery
+		_, _ = w.Write([]byte(`{"result":{"id":"1"}}`))
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	var out sampleResult
+	err := c.do(context.Background(), requestOptions{
+		method: http.MethodGet,
+		path:   "/x",
+		query:  url.Values{"limit": {"25"}, "after": {"cur sor"}},
+		out:    &out,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotRawQuery != "after=cur+sor&limit=25" {
+		t.Fatalf("raw query = %q", gotRawQuery)
+	}
+}
+
+func TestDo_OmitsEmptyQuery(t *testing.T) {
+	var gotURL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotURL = r.URL.String()
+		_, _ = w.Write([]byte(`{"result":{"id":"1"}}`))
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	var out sampleResult
+	if err := c.do(context.Background(), requestOptions{
+		method: http.MethodGet,
+		path:   "/x",
+		query:  url.Values{},
+		out:    &out,
+	}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotURL != "/x" {
+		t.Fatalf("url = %q, want /x with no trailing ?", gotURL)
 	}
 }

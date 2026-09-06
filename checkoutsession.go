@@ -152,12 +152,19 @@ func (s *CheckoutSessionService) Create(ctx context.Context, params CreateChecko
 	return &out, nil
 }
 
-// List returns all checkout sessions.
-func (s *CheckoutSessionService) List(ctx context.Context) (*CheckoutSessionList, error) {
+// List returns a page of checkout sessions. Use WithLimit and WithAfter to
+// page through the collection.
+func (s *CheckoutSessionService) List(ctx context.Context, opts ...ListOption) (*CheckoutSessionList, error) {
+	query, err := buildListQuery(opts)
+	if err != nil {
+		return nil, err
+	}
+
 	var out CheckoutSessionList
 	if err := s.client.do(ctx, requestOptions{
 		method:  http.MethodGet,
 		path:    checkoutSessionPath,
+		query:   query,
 		out:     &out,
 		rawBody: true,
 	}); err != nil {

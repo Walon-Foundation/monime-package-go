@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 )
 
 // FinancialProvider groups the read-only financial provider directories: the
@@ -93,12 +94,25 @@ func (s *BankService) Retrieve(ctx context.Context, providerID string) (*Bank, e
 	return &out, nil
 }
 
-// List returns all bank providers.
-func (s *BankService) List(ctx context.Context) (*BankList, error) {
+// List returns a page of bank providers supported in a country. The country is
+// the ISO 3166-1 alpha-2 code (e.g. "SL") and is required by the API. Use
+// WithLimit and WithAfter to page through the collection.
+func (s *BankService) List(ctx context.Context, country string, opts ...ListOption) (*BankList, error) {
+	if len(country) != 2 {
+		return nil, newValidationError("country is required and must be an ISO 3166-1 alpha-2 code")
+	}
+
+	query, err := buildListQuery(opts)
+	if err != nil {
+		return nil, err
+	}
+	query.Set("country", strings.ToUpper(country))
+
 	var out BankList
 	if err := s.client.do(ctx, requestOptions{
 		method:  http.MethodGet,
 		path:    bankPath,
+		query:   query,
 		out:     &out,
 		rawBody: true,
 	}); err != nil {
@@ -166,12 +180,25 @@ func (s *MomoService) Retrieve(ctx context.Context, providerID string) (*Momo, e
 	return &out, nil
 }
 
-// List returns all momo providers.
-func (s *MomoService) List(ctx context.Context) (*MomoList, error) {
+// List returns a page of momo providers supported in a country. The country is
+// the ISO 3166-1 alpha-2 code (e.g. "SL") and is required by the API. Use
+// WithLimit and WithAfter to page through the collection.
+func (s *MomoService) List(ctx context.Context, country string, opts ...ListOption) (*MomoList, error) {
+	if len(country) != 2 {
+		return nil, newValidationError("country is required and must be an ISO 3166-1 alpha-2 code")
+	}
+
+	query, err := buildListQuery(opts)
+	if err != nil {
+		return nil, err
+	}
+	query.Set("country", strings.ToUpper(country))
+
 	var out MomoList
 	if err := s.client.do(ctx, requestOptions{
 		method:  http.MethodGet,
 		path:    momoPath,
+		query:   query,
 		out:     &out,
 		rawBody: true,
 	}); err != nil {

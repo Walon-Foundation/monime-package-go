@@ -82,12 +82,21 @@ func (s *FinancialTransactionService) Retrieve(ctx context.Context, financialTra
 	return &out, nil
 }
 
-// List returns all financial transactions.
-func (s *FinancialTransactionService) List(ctx context.Context) (*FinancialTransactionList, error) {
+// List returns a page of financial transactions. Use WithLimit and WithAfter to
+// page through the collection, and WithFinancialTransactionAccountID,
+// WithFinancialTransactionReference or WithFinancialTransactionType to narrow
+// it.
+func (s *FinancialTransactionService) List(ctx context.Context, opts ...ListOption) (*FinancialTransactionList, error) {
+	query, err := buildListQuery(opts)
+	if err != nil {
+		return nil, err
+	}
+
 	var out FinancialTransactionList
 	if err := s.client.do(ctx, requestOptions{
 		method:  http.MethodGet,
 		path:    financialTransactionPath,
+		query:   query,
 		out:     &out,
 		rawBody: true,
 	}); err != nil {
