@@ -50,9 +50,11 @@ const (
 	DefaultWebhookFutureTolerance = 60 * time.Second  // furthest accepted clock skew ahead
 )
 
-// WebhookVerifyOptions says how to check a delivery. Set exactly one of Secret
-// (an HS256 webhook) or PublicKeyPEM (an ES256 webhook, the PEM key shown on the
-// webhook in the dashboard or returned as VerificationMethod.PublicKey).
+// WebhookVerifyOptions says how to check a delivery: Secret for an HS256
+// webhook, PublicKeyPEM for an ES256 one (the PEM key shown on the webhook in the
+// dashboard, or returned as VerificationMethod.PublicKey). Set both while you
+// move an endpoint from one webhook to another; a delivery is then accepted if
+// either matches.
 type WebhookVerifyOptions struct {
 	Secret       string
 	PublicKeyPEM string
@@ -103,8 +105,8 @@ func sigErr(reason, format string, args ...any) error {
 // Read the body before decoding it as JSON: re-encoding it changes the bytes
 // and breaks the signature.
 func VerifyWebhookSignature(payload []byte, header string, opts WebhookVerifyOptions) error {
-	if (opts.Secret == "") == (opts.PublicKeyPEM == "") {
-		return sigErr(WebhookReasonNoKey, "set exactly one of Secret (HS256) or PublicKeyPEM (ES256)")
+	if opts.Secret == "" && opts.PublicKeyPEM == "" {
+		return sigErr(WebhookReasonNoKey, "set Secret (HS256) or PublicKeyPEM (ES256)")
 	}
 	if strings.TrimSpace(header) == "" {
 		return sigErr(WebhookReasonMissingHeader, "the %s header is empty", WebhookSignatureHeader)
@@ -166,20 +168,21 @@ func VerifyWebhookSignature(payload []byte, header string, opts WebhookVerifyOpt
 				return nil
 			}
 		}
-		return sigErr(WebhookReasonSignatureMismatch, "no v1 signature matches the secret")
 	}
 
-	key, err := parseP256PublicKey(opts.PublicKeyPEM)
-	if err != nil {
-		return err
-	}
-	digest := sha256.Sum256(signed)
-	for _, sig := range signatures {
-		if ecdsa.VerifyASN1(key, digest[:], sig) {
-			return nil
+	if opts.PublicKeyPEM != "" {
+		key, err := parseP256PublicKey(opts.PublicKeyPEM)
+		if err != nil {
+			return err
+		}
+		digest := sha256.Sum256(signed)
+		for _, sig := range signatures {
+			if ecdsa.VerifyASN1(key, digest[:], sig) {
+				return nil
+			}
 		}
 	}
-	return sigErr(WebhookReasonSignatureMismatch, "no v1 signature matches the public key")
+	return sigErr(WebhookReasonSignatureMismatch, "no v1 signature matches the secret or public key")
 }
 
 func parseP256PublicKey(pemText string) (*ecdsa.PublicKey, error) {

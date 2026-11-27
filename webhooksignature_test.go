@@ -97,6 +97,16 @@ func TestVerifyWebhookSignature_ES256(t *testing.T) {
 	}
 
 	wantReason(t, VerifyWebhookSignature([]byte(vectorBody+"x"), header, opts), WebhookReasonSignatureMismatch)
+
+	// With both a secret and a public key (moving between webhooks), either
+	// signature is accepted.
+	both := WebhookVerifyOptions{Secret: vectorSecret, PublicKeyPEM: publicPEM, Now: atVector}
+	if err := VerifyWebhookSignature([]byte(vectorBody), header, both); err != nil {
+		t.Fatalf("ES256 signature with both configured: %v", err)
+	}
+	if err := VerifyWebhookSignature([]byte(vectorBody), "t="+vectorTimestamp+",v1="+vectorSignature, both); err != nil {
+		t.Fatalf("HS256 signature with both configured: %v", err)
+	}
 	wantReason(t, VerifyWebhookSignature([]byte(vectorBody), header, WebhookVerifyOptions{PublicKeyPEM: "not a key", Now: atVector}), WebhookReasonInvalidPublicKey)
 }
 
