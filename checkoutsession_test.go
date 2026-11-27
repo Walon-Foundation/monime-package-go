@@ -6,63 +6,20 @@ import (
 )
 
 func TestCreateCheckoutSessionParams_Validation(t *testing.T) {
-	valid := CreateCheckoutSessionParams{
-		Name:       "Order",
-		Amount:     1000,
-		Quantity:   1,
-		SuccessURL: "https://example.com/success",
-		CancelURL:  "https://example.com/cancel",
-	}
-
+	item := CheckoutSessionLineItemParams{Name: "Ticket", Price: Amount{Value: 1000}}
 	tests := []struct {
 		name    string
 		params  CreateCheckoutSessionParams
 		wantErr bool
 	}{
-		{
-			name:    "valid",
-			params:  valid,
-			wantErr: false,
-		},
-		{
-			name: "valid with optional fields",
-			params: CreateCheckoutSessionParams{
-				Name: "Order", Amount: 1000, Quantity: 2,
-				SuccessURL: "https://example.com/success", CancelURL: "https://example.com/cancel",
-				Description: "d", FinancialAccountID: "fac-1", PrimaryColor: "#fff", Images: []string{"https://img"},
-			},
-			wantErr: false,
-		},
-		{
-			name:    "missing name",
-			params:  CreateCheckoutSessionParams{Amount: 1000, Quantity: 1, SuccessURL: "https://e.com/s", CancelURL: "https://e.com/c"},
-			wantErr: true,
-		},
-		{
-			name:    "zero amount",
-			params:  CreateCheckoutSessionParams{Name: "O", Amount: 0, Quantity: 1, SuccessURL: "https://e.com/s", CancelURL: "https://e.com/c"},
-			wantErr: true,
-		},
-		{
-			name:    "zero quantity",
-			params:  CreateCheckoutSessionParams{Name: "O", Amount: 1000, Quantity: 0, SuccessURL: "https://e.com/s", CancelURL: "https://e.com/c"},
-			wantErr: true,
-		},
-		{
-			name:    "missing success url",
-			params:  CreateCheckoutSessionParams{Name: "O", Amount: 1000, Quantity: 1, CancelURL: "https://e.com/c"},
-			wantErr: true,
-		},
-		{
-			name:    "invalid success url",
-			params:  CreateCheckoutSessionParams{Name: "O", Amount: 1000, Quantity: 1, SuccessURL: "not-a-url", CancelURL: "https://e.com/c"},
-			wantErr: true,
-		},
-		{
-			name:    "invalid cancel url",
-			params:  CreateCheckoutSessionParams{Name: "O", Amount: 1000, Quantity: 1, SuccessURL: "https://e.com/s", CancelURL: "nope"},
-			wantErr: true,
-		},
+		{name: "name and one line item", params: CreateCheckoutSessionParams{Name: "Order", LineItems: []CheckoutSessionLineItemParams{item}}, wantErr: false},
+		{name: "urls are optional but must be urls", params: CreateCheckoutSessionParams{Name: "Order", LineItems: []CheckoutSessionLineItemParams{item}, SuccessURL: "not-a-url"}, wantErr: true},
+		{name: "missing name", params: CreateCheckoutSessionParams{LineItems: []CheckoutSessionLineItemParams{item}}, wantErr: true},
+		{name: "no line items", params: CreateCheckoutSessionParams{Name: "Order"}, wantErr: true},
+		{name: "seventeen line items", params: CreateCheckoutSessionParams{Name: "Order", LineItems: make([]CheckoutSessionLineItemParams, 17)}, wantErr: true},
+		{name: "line item without a name", params: CreateCheckoutSessionParams{Name: "Order", LineItems: []CheckoutSessionLineItemParams{{Price: Amount{Value: 1}}}}, wantErr: true},
+		{name: "quantity over 100000", params: CreateCheckoutSessionParams{Name: "Order", LineItems: []CheckoutSessionLineItemParams{{Name: "T", Price: Amount{Value: 1}, Quantity: 100001}}}, wantErr: true},
+		{name: "four images", params: CreateCheckoutSessionParams{Name: "Order", LineItems: []CheckoutSessionLineItemParams{{Name: "T", Price: Amount{Value: 1}, Images: []string{"https://a/1", "https://a/2", "https://a/3", "https://a/4"}}}}, wantErr: true},
 	}
 
 	for _, tt := range tests {
