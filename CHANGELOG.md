@@ -23,7 +23,9 @@ guides, checked on 2026-11-27. Intended as v0.3.0.
   - `VerifyWebhookSignature` and `ParseWebhookEvent` check the
     `Monime-Signature` header for HS256 (shared secret) and ES256 (PEM P-256
     public key) webhooks, with the documented 300-second and 60-second
-    freshness window.
+    freshness window. Several `v1` signatures are accepted, and with both a
+    secret and a public key set, either may match (for moving between
+    webhooks).
   - `WebhookEvent` is the decoded envelope, and `Event…` constants cover the
     caph event names.
 - Financial accounts: `Reference` on create, and `Retrieve(ctx, id,
