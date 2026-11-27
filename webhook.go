@@ -18,41 +18,64 @@ func (c *Client) Webhook() *WebhookService {
 
 const webhookPath = "/webhooks"
 
-// WebhookVerificationMethod configures how webhook payloads are signed so the
-// receiver can verify their authenticity.
+// Webhook signing methods and API releases.
+const (
+	WebhookVerificationHS256 = "HS256"
+	WebhookVerificationES256 = "ES256"
+
+	WebhookAPIReleaseCaph    = "caph"
+	WebhookAPIReleaseSiriusB = "siriusb"
+)
+
+// WebhookVerificationMethod configures how Monime signs deliveries.
+//
+//   - HS256: HMAC-SHA256 with a shared Secret of 32 to 256 characters.
+//   - ES256: ECDSA P-256. Monime generates the key pair; send no Secret, and
+//     read the PEM PublicKey from the created webhook to verify deliveries.
+//
+// PublicKey is read-only: it is filled in responses and never sent.
 type WebhookVerificationMethod struct {
-	Type   string `json:"type" validate:"required,oneof=HS256 ES256"`
-	Secret string `json:"secret" validate:"required"`
+	Type      string `json:"type" validate:"required,oneof=HS256 ES256"`
+	Secret    string `json:"secret,omitempty" validate:"required_if=Type HS256,excluded_if=Type ES256,omitempty,min=32,max=256"`
+	PublicKey string `json:"publicKey,omitempty"`
 }
 
-// CreateWebhookParams holds the inputs for creating a webhook. It mirrors the
-// CreateWebhookRequest body of the TypeScript SDK: name, url and events are
-// required, the remaining fields are optional and omitted from the request
-// body when left at their zero value.
+// requestBody is the verification method as the create body accepts it.
+func (m *WebhookVerificationMethod) requestBody() map[string]any {
+	body := map[string]any{"type": m.Type}
+	if m.Type == WebhookVerificationHS256 {
+		body["secret"] = m.Secret
+	}
+	return body
+}
+
+// CreateWebhookParams holds the inputs for POST /v1/webhooks. Name, URL and
+// Events are required. APIRelease defaults to "caph". The remaining fields are
+// optional and omitted from the request body when left at their zero value.
 type CreateWebhookParams struct {
-	Name               string                     `json:"name" validate:"required"`
-	URL                string                     `json:"url" validate:"required,url"`
-	Events             []string                   `json:"events" validate:"required,min=1"`
+	Name               string                     `json:"name" validate:"required,min=1,max=100"`
+	URL                string                     `json:"url" validate:"required,url,max=255"`
+	Events             []string                   `json:"events" validate:"required,min=1,max=100"`
 	Enabled            *bool                      `json:"enabled,omitempty"`
-	APIRelease         string                     `json:"apiRelease,omitempty"`
+	APIRelease         string                     `json:"apiRelease,omitempty" validate:"omitempty,oneof=caph siriusb"`
 	Headers            map[string]string          `json:"headers,omitempty"`
-	AlertEmails        []string                   `json:"alertEmails,omitempty" validate:"omitempty,dive,email"`
+	AlertEmails        []string                   `json:"alertEmails,omitempty" validate:"omitempty,max=2,dive,email"`
 	VerificationMethod *WebhookVerificationMethod `json:"verificationMethod,omitempty"`
 	Metadata           map[string]any             `json:"metadata,omitempty"`
 }
 
-// UpdateWebhookParams holds the inputs for updating a webhook. It mirrors the
-// UpdateWebhookRequest body of the TypeScript SDK where every field is
-// optional and only the supplied fields are sent.
+// UpdateWebhookParams holds the inputs for PATCH /v1/webhooks/{id}. Every field
+// is optional and only the supplied fields are sent. The verification method
+// can't be changed: create a new webhook to rotate keys or secrets.
 type UpdateWebhookParams struct {
-	Name               string                     `json:"name,omitempty" validate:"omitempty,min=1"`
-	URL                string                     `json:"url,omitempty" validate:"omitempty,url"`
-	Events             []string                   `json:"events,omitempty" validate:"omitempty,min=1"`
-	Enabled            *bool                      `json:"enabled,omitempty"`
-	Headers            map[string]string          `json:"headers,omitempty"`
-	AlertEmails        []string                   `json:"alertEmails,omitempty" validate:"omitempty,dive,email"`
-	VerificationMethod *WebhookVerificationMethod `json:"verificationMethod,omitempty"`
-	Metadata           map[string]any             `json:"metadata,omitempty"`
+	Name        string            `json:"name,omitempty" validate:"omitempty,min=1,max=100"`
+	URL         string            `json:"url,omitempty" validate:"omitempty,url,max=255"`
+	Events      []string          `json:"events,omitempty" validate:"omitempty,min=1,max=100"`
+	Enabled     *bool             `json:"enabled,omitempty"`
+	APIRelease  string            `json:"apiRelease,omitempty" validate:"omitempty,oneof=caph siriusb"`
+	Headers     map[string]string `json:"headers,omitempty"`
+	AlertEmails []string          `json:"alertEmails,omitempty" validate:"omitempty,max=2,dive,email"`
+	Metadata    map[string]any    `json:"metadata,omitempty"`
 }
 
 // Webhook is the webhook resource returned by the API.
@@ -82,6 +105,38 @@ func (s *WebhookService) Create(ctx context.Context, params CreateWebhookParams)
 	if err := validateStruct(params); err != nil {
 		return nil, err
 	}
+	if params.VerificationMethod != nil {
+		if err := validateStruct(params.VerificationMethod); err != nil {
+			return nil, err
+		}
+	}
+	if err := validateMetadata(params.Metadata, false); err != nil {
+		return nil, err
+	}
+
+	body := map[string]any{
+		"name":   params.Name,
+		"url":    params.URL,
+		"events": params.Events,
+		// apiRelease is required by the API; caph is its default and current.
+		"apiRelease": WebhookAPIReleaseCaph,
+	}
+	putIfSet(body, "apiRelease", params.APIRelease)
+	if params.Enabled != nil {
+		body["enabled"] = *params.Enabled
+	}
+	if len(params.Headers) > 0 {
+		body["headers"] = params.Headers
+	}
+	if len(params.AlertEmails) > 0 {
+		body["alertEmails"] = params.AlertEmails
+	}
+	if params.VerificationMethod != nil {
+		body["verificationMethod"] = params.VerificationMethod.requestBody()
+	}
+	if params.Metadata != nil {
+		body["metadata"] = params.Metadata
+	}
 
 	key, err := idempotencyKey(ctx)
 	if err != nil {
@@ -92,7 +147,7 @@ func (s *WebhookService) Create(ctx context.Context, params CreateWebhookParams)
 	if err := s.client.do(ctx, requestOptions{
 		method:         http.MethodPost,
 		path:           webhookPath,
-		body:           params,
+		body:           body,
 		idempotencyKey: key,
 		out:            &out,
 	}); err != nil {
@@ -144,6 +199,9 @@ func (s *WebhookService) Update(ctx context.Context, webhookID string, params Up
 		return nil, newValidationError("webhookID is required")
 	}
 	if err := validateStruct(params); err != nil {
+		return nil, err
+	}
+	if err := validateMetadata(params.Metadata, true); err != nil {
 		return nil, err
 	}
 

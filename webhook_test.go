@@ -28,7 +28,7 @@ func TestCreateWebhookParams_Validation(t *testing.T) {
 				APIRelease:         "caph",
 				Headers:            map[string]string{"X-Token": "abc"},
 				AlertEmails:        []string{"ops@example.com"},
-				VerificationMethod: &WebhookVerificationMethod{Type: "HS256", Secret: "supersecretvalue"},
+				VerificationMethod: &WebhookVerificationMethod{Type: "HS256", Secret: "whsec_0123456789abcdef0123456789abcdef"},
 				Metadata:           map[string]any{"team": "payments"},
 			},
 			wantErr: false,
@@ -71,6 +71,31 @@ func TestCreateWebhookParams_Validation(t *testing.T) {
 		{
 			name:    "missing verification secret",
 			params:  CreateWebhookParams{Name: "hook", URL: "https://example.com/hook", Events: []string{"e"}, VerificationMethod: &WebhookVerificationMethod{Type: "HS256"}},
+			wantErr: true,
+		},
+		{
+			name:    "HS256 secret shorter than 32 characters",
+			params:  CreateWebhookParams{Name: "hook", URL: "https://example.com/hook", Events: []string{"e"}, VerificationMethod: &WebhookVerificationMethod{Type: "HS256", Secret: "too-short"}},
+			wantErr: true,
+		},
+		{
+			name:    "ES256 needs no secret",
+			params:  CreateWebhookParams{Name: "hook", URL: "https://example.com/hook", Events: []string{"e"}, VerificationMethod: &WebhookVerificationMethod{Type: "ES256"}},
+			wantErr: false,
+		},
+		{
+			name:    "ES256 with a secret",
+			params:  CreateWebhookParams{Name: "hook", URL: "https://example.com/hook", Events: []string{"e"}, VerificationMethod: &WebhookVerificationMethod{Type: "ES256", Secret: "whsec_0123456789abcdef0123456789abcdef"}},
+			wantErr: true,
+		},
+		{
+			name:    "unknown api release",
+			params:  CreateWebhookParams{Name: "hook", URL: "https://example.com/hook", Events: []string{"e"}, APIRelease: "v2"},
+			wantErr: true,
+		},
+		{
+			name:    "three alert emails",
+			params:  CreateWebhookParams{Name: "hook", URL: "https://example.com/hook", Events: []string{"e"}, AlertEmails: []string{"a@x.io", "b@x.io", "c@x.io"}},
 			wantErr: true,
 		},
 	}
@@ -141,8 +166,8 @@ func TestUpdateWebhookParams_Validation(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "invalid verification type",
-			params:  UpdateWebhookParams{VerificationMethod: &WebhookVerificationMethod{Type: "RS256", Secret: "s"}},
+			name:    "invalid api release",
+			params:  UpdateWebhookParams{APIRelease: "v2"},
 			wantErr: true,
 		},
 	}
