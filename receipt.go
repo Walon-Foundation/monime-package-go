@@ -58,15 +58,60 @@ func (s *ReceiptService) Retrieve(ctx context.Context, orderNumber string) (*Rec
 	return &out, nil
 }
 
+// Receipt statuses.
+const (
+	ReceiptStatusNotRedeemed       = "not_redeemed"
+	ReceiptStatusPartiallyRedeemed = "partially_redeemed"
+	ReceiptStatusFullyRedeemed     = "fully_redeemed"
+)
+
+// RedeemReceiptParams holds the inputs for POST /receipts/{orderNumber}/redeem:
+// either RedeemAll, or the entitlements to redeem and how many units of each.
+type RedeemReceiptParams struct {
+	RedeemAll    bool
+	Entitlements []ReceiptRedemptionItem `validate:"dive"`
+	Metadata     map[string]any
+}
+
+// ReceiptRedemptionItem redeems Units (at least 1; zero means 1) of the
+// entitlement named Key.
+type ReceiptRedemptionItem struct {
+	Key   string `json:"key" validate:"required,min=1,max=100"`
+	Units int    `json:"units,omitempty" validate:"omitempty,min=1"`
+}
+
+// ReceiptRedemption is what a redemption returns: whether it was applied, and
+// the receipt as it now stands.
+type ReceiptRedemption struct {
+	Redeem  bool    `json:"redeem"`
+	Receipt Receipt `json:"receipt"`
+}
+
 // Redeem redeems one or more entitlements from a receipt. When processing a
 // bulk redemption, if any entitlement is already exhausted the entire
 // operation is rejected.
-func (s *ReceiptService) Redeem(ctx context.Context, orderNumber string, body map[string]any) (*Receipt, error) {
-	if orderNumber == "" {
-		return nil, newValidationError("orderNumber is required")
+func (s *ReceiptService) Redeem(ctx context.Context, orderNumber string, params RedeemReceiptParams) (*ReceiptRedemption, error) {
+	if orderNumber == "" || len(orderNumber) > 20 {
+		return nil, newValidationError("orderNumber is required and is at most 20 characters")
 	}
-	if len(body) == 0 {
-		return nil, newValidationError("body is required to redeem a receipt")
+	if !params.RedeemAll && len(params.Entitlements) == 0 {
+		return nil, newValidationError("set RedeemAll or list the entitlements to redeem")
+	}
+	if err := validateStruct(params); err != nil {
+		return nil, err
+	}
+	if err := validateMetadata(params.Metadata, false); err != nil {
+		return nil, err
+	}
+	body := map[string]any{}
+	if params.RedeemAll {
+		body["redeemAll"] = true
+	}
+	if len(params.Entitlements) > 0 {
+		body["entitlements"] = params.Entitlements
+	}
+	if params.Metadata != nil {
+		body["metadata"] = params.Metadata
 	}
 
 	key, err := idempotencyKey(ctx)
@@ -74,7 +119,7 @@ func (s *ReceiptService) Redeem(ctx context.Context, orderNumber string, body ma
 		return nil, err
 	}
 
-	var out Receipt
+	var out ReceiptRedemption
 	if err := s.client.do(ctx, requestOptions{
 		method:         http.MethodPost,
 		path:           fmt.Sprintf("%s/%s/redeem", receiptPath, orderNumber),
