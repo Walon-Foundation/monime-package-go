@@ -31,10 +31,46 @@ type PayoutDestination struct {
 	TransactionReference string `json:"transactionReference,omitempty"`
 }
 
+// Provider ids the API's payout schema lists. Monime adds providers over time,
+// so other ids are passed through; read the live list with
+// FinancialProvider().ListBanks / ListMomos.
+const (
+	PayoutProviderSLCB          = "slb001" // Sierra Leone Commercial Bank
+	PayoutProviderGTBank        = "slb004" // Guaranty Trust Bank
+	PayoutProviderAccessBank    = "slb007" // Access Bank
+	PayoutProviderOrangeMoney   = "m17"
+	PayoutProviderAfricellMoney = "m18"
+	PayoutProviderMonimeWallet  = "dw001"
+)
+
+// Payout statuses.
+const (
+	PayoutStatusPending    = "pending"
+	PayoutStatusProcessing = "processing"
+	PayoutStatusCompleted  = "completed"
+	PayoutStatusFailed     = "failed"
+)
+
+// Payout failure codes, from failureDetail.code.
+const (
+	PayoutFailureUnknown                       = "unknown"
+	PayoutFailureFundInsufficient              = "fund_insufficient"
+	PayoutFailureAuthorizationFailed           = "authorization_failed"
+	PayoutFailureProviderUnknown               = "provider_unknown"
+	PayoutFailureProviderAccountBlocked        = "provider_account_blocked"
+	PayoutFailureProviderAccountMissing        = "provider_account_missing"
+	PayoutFailureProviderAccountQuotaExhausted = "provider_account_quota_exhausted"
+)
+
 // CreatePayoutParams holds the inputs for creating a payout.
 type CreatePayoutParams struct {
-	Amount        int64             `validate:"gt=0"`
-	SourceAccount string            `validate:"required"`
+	// Amount is in minor units (cents), sent as-is.
+	Amount int64 `validate:"gt=0"`
+	// Currency defaults to SLE; the API also supports USD.
+	Currency Currency
+	// SourceAccount is the financial account to pay from. Leave it empty to pay
+	// from the Space's main account, as the API does when source is omitted.
+	SourceAccount string
 	Destination   PayoutDestination `validate:"-"`
 	Metadata      map[string]any
 }
@@ -47,8 +83,9 @@ type PayoutSource struct {
 
 // PayoutFee is a single fee applied to a payout.
 type PayoutFee struct {
-	Code   string `json:"code"`
-	Amount Amount `json:"amount"`
+	Code     string         `json:"code"`
+	Amount   Amount         `json:"amount"`
+	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
 // PayoutFailureDetail describes why a payout failed, when applicable.
@@ -59,9 +96,10 @@ type PayoutFailureDetail struct {
 
 // PayoutOwner is a node in a payout's ownership graph.
 type PayoutOwner struct {
-	ID    string       `json:"id"`
-	Type  string       `json:"type"`
-	Owner *PayoutOwner `json:"owner,omitempty"`
+	ID       string         `json:"id"`
+	Type     string         `json:"type"`
+	Metadata map[string]any `json:"metadata,omitempty"`
+	Owner    *PayoutOwner   `json:"owner,omitempty"`
 }
 
 // PayoutOwnershipGraph traces the ownership of a payout.
@@ -90,40 +128,62 @@ type PayoutList struct {
 	Pagination Pagination `json:"pagination"`
 }
 
-// validatePayoutDestination enforces the discriminated-union shape: Type must be
-// one of momo/bank/wallet and ProviderID must be present.
-func validatePayoutDestination(d PayoutDestination) error {
-	switch d.Type {
-	case "momo", "bank", "wallet":
-	default:
-		return newValidationError("destination.type must be one of momo, bank, wallet")
-	}
+// payoutDestinationBody validates the destination's discriminated union and
+// returns only the fields its type allows. The API rejects unknown properties on
+// each variant, and transactionReference is read-only, so nothing else is sent:
+// bank needs accountNumber, momo needs phoneNumber, wallet takes an optional
+// walletId.
+func payoutDestinationBody(d PayoutDestination) (map[string]any, error) {
 	if d.ProviderID == "" {
-		return newValidationError("destination.providerId is required")
+		return nil, newValidationError("destination.providerId is required")
 	}
-	return nil
+	body := map[string]any{"type": d.Type, "providerId": d.ProviderID}
+	switch d.Type {
+	case "bank":
+		if d.AccountNumber == "" {
+			return nil, newValidationError("destination.accountNumber is required for a bank payout")
+		}
+		body["accountNumber"] = d.AccountNumber
+	case "momo":
+		if d.PhoneNumber == "" {
+			return nil, newValidationError("destination.phoneNumber is required for a momo payout")
+		}
+		body["phoneNumber"] = d.PhoneNumber
+	case "wallet":
+		putIfSet(body, "walletId", d.WalletID)
+	default:
+		return nil, newValidationError("destination.type must be one of momo, bank, wallet")
+	}
+	return body, nil
 }
 
-// Create creates a new payout. Unlike payment codes, the amount is sent as-is in
-// minor units and is not multiplied (matching the Monime API and the TS SDK).
+// Create creates a new payout. The amount is in minor units and sent as-is.
+// Pass a key with WithIdempotencyKey so a retry can't pay twice.
 func (s *PayoutService) Create(ctx context.Context, params CreatePayoutParams) (*Payout, error) {
 	if err := validateStruct(params); err != nil {
 		return nil, err
 	}
-	if err := validatePayoutDestination(params.Destination); err != nil {
+	destination, err := payoutDestinationBody(params.Destination)
+	if err != nil {
+		return nil, err
+	}
+	currency, err := currencyOrDefault(params.Currency)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateMetadata(params.Metadata, false); err != nil {
 		return nil, err
 	}
 
-	metadata := params.Metadata
-	if metadata == nil {
-		metadata = map[string]any{}
-	}
-
 	body := map[string]any{
-		"amount":      Amount{Currency: "SLE", Value: params.Amount},
-		"source":      map[string]any{"financialAccountId": params.SourceAccount},
-		"destination": params.Destination,
-		"metadata":    metadata,
+		"amount":      Amount{Currency: string(currency), Value: params.Amount},
+		"destination": destination,
+	}
+	if params.SourceAccount != "" {
+		body["source"] = map[string]any{"financialAccountId": params.SourceAccount}
+	}
+	if params.Metadata != nil {
+		body["metadata"] = params.Metadata
 	}
 
 	key, err := idempotencyKey(ctx)
@@ -183,15 +243,14 @@ func (s *PayoutService) List(ctx context.Context, opts ...ListOption) (*PayoutLi
 	return &out, nil
 }
 
-// Update applies a partial update to a payout. The fields accepted are those
-// documented for PATCH /payouts/{id} (notably metadata); fields can only be
-// modified while the payout has not yet been processed.
+// Update applies a partial update to a payout. PATCH /payouts/{id} accepts only
+// metadata, and only before the payout is processed.
 func (s *PayoutService) Update(ctx context.Context, payoutID string, params map[string]any) (*Payout, error) {
 	if payoutID == "" {
 		return nil, newValidationError("payoutID is required")
 	}
-	if len(params) == 0 {
-		return nil, newValidationError("at least one field is required to update")
+	if err := validateUpdate(params, map[string]updateField{"metadata": {}}); err != nil {
+		return nil, err
 	}
 
 	key, err := idempotencyKey(ctx)

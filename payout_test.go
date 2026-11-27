@@ -57,12 +57,13 @@ func TestCreatePayoutParams_Validation(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "missing source account",
+			// The API pays from the Space's main account when source is omitted.
+			name: "no source account is allowed",
 			params: CreatePayoutParams{
 				Amount:      100,
 				Destination: PayoutDestination{Type: "momo", ProviderID: "m17"},
 			},
-			wantErr: true,
+			wantErr: false,
 		},
 	}
 
@@ -91,9 +92,11 @@ func TestValidatePayoutDestination(t *testing.T) {
 		dest    PayoutDestination
 		wantErr bool
 	}{
-		{name: "momo ok", dest: PayoutDestination{Type: "momo", ProviderID: "m17"}, wantErr: false},
-		{name: "bank ok", dest: PayoutDestination{Type: "bank", ProviderID: "slb001"}, wantErr: false},
-		{name: "wallet ok", dest: PayoutDestination{Type: "wallet", ProviderID: "dw001"}, wantErr: false},
+		{name: "momo ok", dest: PayoutDestination{Type: "momo", ProviderID: "m17", PhoneNumber: "+23276123456"}, wantErr: false},
+		{name: "bank ok", dest: PayoutDestination{Type: "bank", ProviderID: "slb001", AccountNumber: "0012345"}, wantErr: false},
+		{name: "wallet ok without wallet id", dest: PayoutDestination{Type: "wallet", ProviderID: "dw001"}, wantErr: false},
+		{name: "momo without phone", dest: PayoutDestination{Type: "momo", ProviderID: "m17"}, wantErr: true},
+		{name: "bank without account", dest: PayoutDestination{Type: "bank", ProviderID: "slb001"}, wantErr: true},
 		{name: "invalid type", dest: PayoutDestination{Type: "card", ProviderID: "x"}, wantErr: true},
 		{name: "empty type", dest: PayoutDestination{ProviderID: "m17"}, wantErr: true},
 		{name: "missing provider", dest: PayoutDestination{Type: "momo"}, wantErr: true},
@@ -101,7 +104,7 @@ func TestValidatePayoutDestination(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validatePayoutDestination(tt.dest)
+			_, err := payoutDestinationBody(tt.dest)
 			if tt.wantErr && err == nil {
 				t.Fatal("expected validation error")
 			}
@@ -115,5 +118,18 @@ func TestValidatePayoutDestination(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestPayoutDestinationBody_SendsOnlyTheVariantFields(t *testing.T) {
+	body, err := payoutDestinationBody(PayoutDestination{
+		Type: "momo", ProviderID: "m18", PhoneNumber: "+23276123456",
+		AccountNumber: "ignored", WalletID: "ignored", TransactionReference: "read-only",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(body) != 3 || body["phoneNumber"] != "+23276123456" {
+		t.Fatalf("momo destination must carry type, providerId and phoneNumber only, got %v", body)
 	}
 }

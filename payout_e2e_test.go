@@ -73,7 +73,7 @@ func TestPayout_Create(t *testing.T) {
 	}
 }
 
-func TestPayout_Create_DefaultsMetadata(t *testing.T) {
+func TestPayout_Create_OmitsUnsetSourceAndMetadata(t *testing.T) {
 	var gotBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
@@ -84,15 +84,20 @@ func TestPayout_Create_DefaultsMetadata(t *testing.T) {
 
 	c := newTestClient(t, srv)
 	if _, err := c.Payout().Create(context.Background(), CreatePayoutParams{
-		Amount:        50,
-		SourceAccount: "fac-1",
-		Destination:   PayoutDestination{Type: "bank", ProviderID: "slb001", AccountNumber: "12345"},
+		Amount:      50,
+		Destination: PayoutDestination{Type: "bank", ProviderID: "slb001", AccountNumber: "12345"},
 	}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	meta, ok := gotBody["metadata"].(map[string]any)
-	if !ok || len(meta) != 0 {
-		t.Errorf("metadata should default to empty object, got %v", gotBody["metadata"])
+	// With no source the API pays from the Space's main account; metadata is
+	// optional. Neither may be sent empty.
+	for _, k := range []string{"source", "metadata"} {
+		if _, present := gotBody[k]; present {
+			t.Errorf("%s should be omitted when unset, got %v", k, gotBody[k])
+		}
+	}
+	if amount, _ := gotBody["amount"].(map[string]any); amount["currency"] != "SLE" || amount["value"] != float64(50) {
+		t.Errorf("amount = %v, want SLE 50 minor units", gotBody["amount"])
 	}
 }
 
