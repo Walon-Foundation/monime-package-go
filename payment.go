@@ -36,15 +36,35 @@ type Payment struct {
 	Metadata                      map[string]any        `json:"metadata,omitempty"`
 }
 
-// PaymentChannel describes the channel a payment was made through.
+// Payment statuses. The API has no failed state for payments.
+const (
+	PaymentStatusPending    = "pending"
+	PaymentStatusProcessing = "processing"
+	PaymentStatusCompleted  = "completed"
+)
+
+// PaymentChannel describes the channel a payment was made through. Type is
+// bank, card, momo or wallet, and selects which fields are set: bank uses
+// AccountNumber, momo PhoneNumber, wallet WalletID (each with Provider and
+// Reference), and card Scheme and Last4.
 type PaymentChannel struct {
-	Type string `json:"type"`
+	Type          string         `json:"type"`
+	Provider      string         `json:"provider,omitempty"`
+	Reference     string         `json:"reference,omitempty"`
+	AccountNumber string         `json:"accountNumber,omitempty"`
+	PhoneNumber   string         `json:"phoneNumber,omitempty"`
+	WalletID      string         `json:"walletId,omitempty"`
+	Scheme        string         `json:"scheme,omitempty"` // visa or mastercard
+	Last4         string         `json:"last4,omitempty"`
+	Fingerprint   string         `json:"fingerprint,omitempty"`
+	Metadata      map[string]any `json:"metadata,omitempty"`
 }
 
 // PaymentFee is a single fee applied to a payment.
 type PaymentFee struct {
-	Code   string `json:"code"`
-	Amount Amount `json:"amount"`
+	Code     string         `json:"code"`
+	Amount   Amount         `json:"amount"`
+	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
 // PaymentOwnershipGraph describes the ownership chain of a payment.
@@ -57,6 +77,7 @@ type PaymentOwner struct {
 	ID       string         `json:"id"`
 	Type     string         `json:"type"`
 	Metadata map[string]any `json:"metadata,omitempty"`
+	Owner    *PaymentOwner  `json:"owner,omitempty"`
 }
 
 // PaymentList is the paginated payment list response.
@@ -109,8 +130,9 @@ func (s *PaymentService) Update(ctx context.Context, paymentID string, params ma
 	if paymentID == "" {
 		return nil, newValidationError("paymentID is required")
 	}
-	if len(params) == 0 {
-		return nil, newValidationError("at least one field is required to update")
+	// PATCH /payments/{id} accepts name (100 characters) and metadata only.
+	if err := validateUpdate(params, map[string]updateField{"name": {maxLen: 100}, "metadata": {}}); err != nil {
+		return nil, err
 	}
 
 	key, err := idempotencyKey(ctx)

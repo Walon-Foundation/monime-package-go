@@ -116,3 +116,35 @@ func TestPayment_Update_ValidationShortCircuits(t *testing.T) {
 		t.Fatal("expected error for empty params")
 	}
 }
+
+func TestPayment_Retrieve_DecodesChannel(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"result":{"id":"pay-1","status":"completed","channel":{"type":"momo","provider":"m17","reference":"MP123","phoneNumber":"+23276123456","fingerprint":"fp1"},"fees":[{"code":"processing","amount":{"currency":"SLE","value":25},"metadata":{"k":"v"}}]}}`))
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	got, err := c.Payment().Retrieve(context.Background(), "pay-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ch := got.Channel
+	if got.Status != PaymentStatusCompleted || ch.Type != "momo" || ch.Provider != "m17" || ch.Reference != "MP123" || ch.PhoneNumber != "+23276123456" || ch.Fingerprint != "fp1" {
+		t.Fatalf("channel = %+v", ch)
+	}
+	if len(got.Fees) != 1 || got.Fees[0].Metadata["k"] != "v" {
+		t.Fatalf("fees = %+v", got.Fees)
+	}
+}
+
+func TestPayment_Update_RejectsUnknownField(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Error("server should not be called when validation fails")
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	if _, err := c.Payment().Update(context.Background(), "pay-1", map[string]any{"status": "completed"}); err == nil {
+		t.Fatal("expected validation error: PATCH /payments/{id} accepts name and metadata only")
+	}
+}
