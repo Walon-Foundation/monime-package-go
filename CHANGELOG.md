@@ -2,14 +2,18 @@
 
 All notable changes to this SDK are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
-[Semantic Versioning](https://semver.org/). Until 1.0.0, a minor release may
-break the API; each break is marked **BREAKING** with what to change.
+[Semantic Versioning](https://semver.org/). Each break is marked **BREAKING**
+with what to change.
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-27
+
 A conformance pass against Monime's published OpenAPI spec
 (`https://docs.monime.io/apis/openapi.json`, release `caph.2025-08-23`) and its
-guides, checked on 2026-11-27. Intended as v0.3.0.
+guides, checked on 2026-11-27. It is the first release after v0.2.0; the
+version moves to 1.2.0 to match the TypeScript SDK, which ships the same
+changes. It breaks the v0.2.0 API in the places marked **BREAKING** below.
 
 ### Added
 
@@ -146,6 +150,7 @@ Initial release.
   end-to-end tests.
 - README, CONTRIBUTING, LICENSE, SECURITY and runnable examples.
 
-[Unreleased]: https://github.com/Walon-Foundation/monime-package-go/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/Walon-Foundation/monime-package-go/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/Walon-Foundation/monime-package-go/compare/v0.2.0...v1.2.0
 [0.2.0]: https://github.com/Walon-Foundation/monime-package-go/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Walon-Foundation/monime-package-go/releases/tag/v0.1.0
