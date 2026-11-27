@@ -113,9 +113,9 @@ func (s *PaymentService) Update(ctx context.Context, paymentID string, params ma
 		return nil, newValidationError("at least one field is required to update")
 	}
 
-	key, err := generateIdempotencyKey()
+	key, err := idempotencyKey(ctx)
 	if err != nil {
-		return nil, &Error{Message: err.Error()}
+		return nil, err
 	}
 
 	var out Payment

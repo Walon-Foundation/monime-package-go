@@ -69,9 +69,9 @@ func (s *ReceiptService) Redeem(ctx context.Context, orderNumber string, body ma
 		return nil, newValidationError("body is required to redeem a receipt")
 	}
 
-	key, err := generateIdempotencyKey()
+	key, err := idempotencyKey(ctx)
 	if err != nil {
-		return nil, &Error{Message: err.Error()}
+		return nil, err
 	}
 
 	var out Receipt

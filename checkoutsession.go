@@ -134,9 +134,9 @@ func (s *CheckoutSessionService) Create(ctx context.Context, params CreateChecko
 		"metadata": map[string]any{},
 	}
 
-	key, err := generateIdempotencyKey()
+	key, err := idempotencyKey(ctx)
 	if err != nil {
-		return nil, &Error{Message: err.Error()}
+		return nil, err
 	}
 
 	var out CheckoutSession

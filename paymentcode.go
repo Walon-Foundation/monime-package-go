@@ -117,9 +117,9 @@ func (s *PaymentCodeService) Create(ctx context.Context, params CreatePaymentCod
 		body["financialAccountId"] = params.FinancialAccountID
 	}
 
-	key, err := generateIdempotencyKey()
+	key, err := idempotencyKey(ctx)
 	if err != nil {
-		return nil, &Error{Message: err.Error()}
+		return nil, err
 	}
 
 	var out PaymentCode
@@ -183,9 +183,9 @@ func (s *PaymentCodeService) Update(ctx context.Context, paymentCodeID string, p
 		return nil, newValidationError("at least one field is required to update")
 	}
 
-	key, err := generateIdempotencyKey()
+	key, err := idempotencyKey(ctx)
 	if err != nil {
-		return nil, &Error{Message: err.Error()}
+		return nil, err
 	}
 
 	var out PaymentCode

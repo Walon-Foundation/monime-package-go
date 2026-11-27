@@ -54,9 +54,9 @@ func (s *UssdOtpService) Create(ctx context.Context, params CreateUssdOtpParams)
 		"authorizedPhoneNumber": params.AuthorizedPhoneNumber,
 	}
 
-	key, err := generateIdempotencyKey()
+	key, err := idempotencyKey(ctx)
 	if err != nil {
-		return nil, &Error{Message: err.Error()}
+		return nil, err
 	}
 
 	var out UssdOtp

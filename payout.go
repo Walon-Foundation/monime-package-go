@@ -126,9 +126,9 @@ func (s *PayoutService) Create(ctx context.Context, params CreatePayoutParams) (
 		"metadata":    metadata,
 	}
 
-	key, err := generateIdempotencyKey()
+	key, err := idempotencyKey(ctx)
 	if err != nil {
-		return nil, &Error{Message: err.Error()}
+		return nil, err
 	}
 
 	var out Payout
@@ -194,9 +194,9 @@ func (s *PayoutService) Update(ctx context.Context, payoutID string, params map[
 		return nil, newValidationError("at least one field is required to update")
 	}
 
-	key, err := generateIdempotencyKey()
+	key, err := idempotencyKey(ctx)
 	if err != nil {
-		return nil, &Error{Message: err.Error()}
+		return nil, err
 	}
 
 	var out Payout

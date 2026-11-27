@@ -100,9 +100,9 @@ func (s *InternalTransferService) Create(ctx context.Context, params CreateInter
 		"metadata":                    metadata,
 	}
 
-	key, err := generateIdempotencyKey()
+	key, err := idempotencyKey(ctx)
 	if err != nil {
-		return nil, &Error{Message: err.Error()}
+		return nil, err
 	}
 
 	var out InternalTransfer
@@ -169,9 +169,9 @@ func (s *InternalTransferService) Update(ctx context.Context, internalTransferID
 		return nil, newValidationError("at least one field is required to update")
 	}
 
-	key, err := generateIdempotencyKey()
+	key, err := idempotencyKey(ctx)
 	if err != nil {
-		return nil, &Error{Message: err.Error()}
+		return nil, err
 	}
 
 	var out InternalTransfer

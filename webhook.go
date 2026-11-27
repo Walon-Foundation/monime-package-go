@@ -83,9 +83,9 @@ func (s *WebhookService) Create(ctx context.Context, params CreateWebhookParams)
 		return nil, err
 	}
 
-	key, err := generateIdempotencyKey()
+	key, err := idempotencyKey(ctx)
 	if err != nil {
-		return nil, &Error{Message: err.Error()}
+		return nil, err
 	}
 
 	var out Webhook
@@ -147,9 +147,9 @@ func (s *WebhookService) Update(ctx context.Context, webhookID string, params Up
 		return nil, err
 	}
 
-	key, err := generateIdempotencyKey()
+	key, err := idempotencyKey(ctx)
 	if err != nil {
-		return nil, &Error{Message: err.Error()}
+		return nil, err
 	}
 
 	var out Webhook
