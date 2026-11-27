@@ -31,3 +31,6 @@ type Pagination struct {
 	// empty on the last page.
 	Next string `json:"next"`
 }
+
+// String returns the currency code.
+func (c Currency) String() string { return string(c) }
