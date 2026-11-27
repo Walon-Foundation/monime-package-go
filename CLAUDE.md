@@ -47,7 +47,20 @@ method, path, headers, body, decoding, and the validation short-circuit).
   for bodies; guard required path params with `newValidationError("...")`.
   Tests assert that an invalid call never reaches the server.
 - **Mutating calls (POST/PATCH) set an idempotency key** from
-  `generateIdempotencyKey()` via `requestOptions.idempotencyKey`.
+  `idempotencyKey(ctx)`: the caller's key from `WithIdempotencyKey`, validated
+  (1–64 chars), or a random one. Never call `generateIdempotencyKey()` directly
+  from a resource: a key made inside the call can't make a retry safe.
+- **Send only what the caller set.** Every request body in the spec has
+  `additionalProperties: false` and nullable optional fields, so build bodies as
+  maps and use `putIfSet` for optional strings. Never send `""`, `{}` or `null`
+  for something the caller left out, and never send read-only fields
+  (`transactionReference`, a webhook's `publicKey`).
+- **Validate metadata and updates.** Request metadata goes through
+  `validateMetadata` (64 pairs, key pattern and reserved prefixes, string values
+  ≤100). Untyped `Update(..., map[string]any)` bodies go through
+  `validateUpdate` with that endpoint's allowed fields and length limits.
+- **Amounts are minor units everywhere** and are never scaled. Currency comes
+  from the caller through `currencyOrDefault` (SLE default, SLE or USD).
 - **Prefix every exported type with its resource** (`PayoutOwner`, not
   `Owner`) — the flat package makes collisions easy. Reuse the shared `Amount`
   and `Pagination`; never redefine them.
@@ -66,17 +79,19 @@ method, path, headers, body, decoding, and the validation short-circuit).
 
 ## API conformance
 
-The authority is the canonical OpenAPI file for the pinned version, **not** the
-rendered docs site:
+The authority is the OpenAPI file Monime publishes, for release
+`caph.2025-08-23` (still the latest as of 2026-11-27):
 
 ```
-https://raw.githubusercontent.com/monimesl/monime-developer-apis/refs/heads/main/versions/caph/2025-08-23/openapi.yaml
+https://docs.monime.io/apis/openapi.json
 ```
 
-The published docs index (`llms.txt`) omits the `/v1/countries` endpoints that
-the spec defines, so verifying against the site alone under-reports the API
-surface. The SDK covers all 46 operations in that file; re-diff method+path
-against it when adding a resource.
+Field rules (lengths, enums, required, `additionalProperties`) come from it.
+Behaviour the spec doesn't express (idempotency, metadata limits, webhook
+signing, supported currencies) comes from the guides; every page is available as
+Markdown by adding `.md`, and `https://docs.monime.io/agents.md` summarises them.
+The SDK covers all 46 operations in the spec; re-diff method+path against it
+when adding a resource. `CHANGELOG.md` records each conformance pass.
 
 Facts that are easy to get wrong and are pinned by tests:
 
@@ -88,21 +103,17 @@ Facts that are easy to get wrong and are pinned by tests:
 - Lists are cursor-paginated with `limit` (1–50, default 10) and `after`.
 - `GET /banks` and `GET /momos` **require** a `country` query param, which is
   why those two `List`s take it as a positional argument.
-- `Idempotency-Key` is required on POST only and capped at 64 chars; the
-  40-char hex key from `generateIdempotencyKey` sits inside the documented
-  25–64 range.
-
-Webhook `Monime-Signature` verification is **not** implemented: the Monime HMAC
-docs page is still an unpublished placeholder, so there is no spec to build
-against. Don't guess an algorithm.
-
-## Known asymmetry — do not "fix" it
-
-Amount scaling is intentionally inconsistent because the API is:
-`PaymentCode.Create` multiplies its major-unit `Amount` by 100
-(`paymentcode.go`), while `Payout.Create` forwards the value **as-is** in minor
-units. Both behaviors are pinned by tests. Currency is hard-coded `"SLE"` in
-those create bodies.
+- `Idempotency-Key` is required on POST only and capped at 64 chars; the docs
+  recommend more than 25. `IdempotencyKeyFor` is a UUIDv5 in a fixed namespace
+  shared with the TypeScript SDK; the test vectors in `idempotency_test.go`
+  must match the TS ones.
+- `Monime-Version` defaults to `DefaultVersion` (`caph.2025-08-23`).
+- Webhook `Monime-Signature` is `t=<unix>,v1=<base64>` over `t + "_" + rawBody`
+  (underscore, not period): HMAC-SHA256 for HS256, an ASN.1 DER ECDSA P-256
+  signature for ES256. `webhooksignature.go` implements it; the HS256 vector in
+  its test is shared with the TS SDK.
+- `providerKyc` requires the `accountId` query. `receipts/{n}/redeem` returns
+  `{redeem, receipt}`. Payment codes and checkout line items take minor units.
 
 ## Tests
 
