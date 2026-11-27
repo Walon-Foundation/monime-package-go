@@ -23,7 +23,20 @@ const ussdOtpPath = "/ussd-otps"
 // the TS SDK's older "phoneNumber" field was incorrect and is fixed here.
 type CreateUssdOtpParams struct {
 	AuthorizedPhoneNumber string `validate:"required"`
+	// VerificationMessage is shown to the user when they dial, up to 255
+	// characters.
+	VerificationMessage string `validate:"max=255"`
+	// Duration is how long the code is valid, e.g. "5m" (the API's default).
+	Duration string
+	Metadata map[string]any
 }
+
+// USSD OTP statuses.
+const (
+	UssdOtpStatusPending  = "pending"
+	UssdOtpStatusVerified = "verified"
+	UssdOtpStatusExpired  = "expired"
+)
 
 // UssdOtp is the one-time passcode session resource returned by the API.
 type UssdOtp struct {
@@ -50,13 +63,22 @@ func (s *UssdOtpService) Create(ctx context.Context, params CreateUssdOtpParams)
 		return nil, err
 	}
 
+	if err := validateMetadata(params.Metadata, false); err != nil {
+		return nil, err
+	}
+
 	body := map[string]any{
 		"authorizedPhoneNumber": params.AuthorizedPhoneNumber,
 	}
+	putIfSet(body, "verificationMessage", params.VerificationMessage)
+	putIfSet(body, "duration", params.Duration)
+	if params.Metadata != nil {
+		body["metadata"] = params.Metadata
+	}
 
-	key, err := generateIdempotencyKey()
+	key, err := idempotencyKey(ctx)
 	if err != nil {
-		return nil, &Error{Message: err.Error()}
+		return nil, err
 	}
 
 	var out UssdOtp

@@ -15,7 +15,7 @@ func TestProviderKyc_Retrieve_RequiresID(t *testing.T) {
 	defer srv.Close()
 
 	c := newTestClient(t, srv)
-	_, err := c.ProviderKyc().Retrieve(context.Background(), "")
+	_, err := c.ProviderKyc().Retrieve(context.Background(), "", "+23276123456")
 	if err == nil {
 		t.Fatal("expected validation error for empty providerID")
 	}

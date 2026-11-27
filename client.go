@@ -34,7 +34,7 @@ func WithSpaceID(spaceID string) Option {
 }
 
 // WithVersion pins the Monime-Version header. Falls back to the MONIME_VERSION
-// environment variable when unset.
+// environment variable, then to DefaultVersion.
 func WithVersion(version MonimeVersion) Option {
 	return func(c *Client) { c.version = version }
 }
@@ -70,6 +70,11 @@ func New(opts ...Option) (*Client, error) {
 	}
 	if c.version == "" {
 		c.version = MonimeVersion(os.Getenv("MONIME_VERSION"))
+	}
+	if c.version == "" {
+		// Monime asks every client to send Monime-Version; without it the
+		// server's choice of release is undocumented.
+		c.version = DefaultVersion
 	}
 
 	if strings.TrimSpace(c.spaceID) == "" {

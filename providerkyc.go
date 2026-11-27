@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 )
 
 // ProviderKycService provides access to the provider-kyc API.
@@ -40,15 +41,21 @@ type ProviderKycProvider struct {
 	Name string `json:"name"`
 }
 
-// Retrieve fetches the provider KYC details for a single provider by id.
-func (s *ProviderKycService) Retrieve(ctx context.Context, providerID string) (*ProviderKyc, error) {
+// Retrieve looks up who holds accountID at a provider: for example the
+// registered name behind a mobile money number (providerID "m17", accountID
+// "+23276123456") or a bank account number. The API requires both.
+func (s *ProviderKycService) Retrieve(ctx context.Context, providerID, accountID string) (*ProviderKyc, error) {
 	if providerID == "" {
 		return nil, newValidationError("providerID is required")
+	}
+	if accountID == "" {
+		return nil, newValidationError("accountID is required")
 	}
 	var out ProviderKyc
 	if err := s.client.do(ctx, requestOptions{
 		method: http.MethodGet,
-		path:   fmt.Sprintf("%s/%s", providerKycPath, providerID),
+		path:   fmt.Sprintf("%s/%s", providerKycPath, url.PathEscape(providerID)),
+		query:  url.Values{"accountId": {accountID}},
 		out:    &out,
 	}); err != nil {
 		return nil, err

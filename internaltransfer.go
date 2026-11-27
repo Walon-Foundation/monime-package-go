@@ -24,13 +24,15 @@ const internalTransferPath = "/internal-transfers"
 // must be greater than zero.
 type CreateInternalTransferParams struct {
 	// SourceAccount is the financial account id to debit.
-	SourceAccount string `validate:"required"`
+	SourceAccount string `validate:"required,max=64"`
 	// DestinationAccount is the financial account id to credit.
-	DestinationAccount string `validate:"required"`
-	// Amount is the value forwarded as amount.value (currency is fixed to SLE).
+	DestinationAccount string `validate:"required,max=64"`
+	// Amount is in minor units, forwarded as amount.value.
 	Amount int64 `validate:"gt=0"`
+	// Currency defaults to SLE; the API also supports USD.
+	Currency Currency
 	// Description is optional free-form context (up to 150 characters).
-	Description string
+	Description string `validate:"max=150"`
 	// Metadata is optional key-value context attached to the transfer.
 	Metadata map[string]any
 }
@@ -69,10 +71,22 @@ type InternalTransferOwnershipGraph struct {
 
 // InternalTransferOwner is a node in the ownership graph.
 type InternalTransferOwner struct {
-	ID    string                 `json:"id"`
-	Type  string                 `json:"type"`
-	Owner *InternalTransferOwner `json:"owner,omitempty"`
+	ID       string                 `json:"id"`
+	Type     string                 `json:"type"`
+	Metadata map[string]any         `json:"metadata,omitempty"`
+	Owner    *InternalTransferOwner `json:"owner,omitempty"`
 }
+
+// Internal transfer statuses and failure codes.
+const (
+	InternalTransferStatusPending    = "pending"
+	InternalTransferStatusProcessing = "processing"
+	InternalTransferStatusCompleted  = "completed"
+	InternalTransferStatusFailed     = "failed"
+
+	InternalTransferFailureUnknown          = "unknown"
+	InternalTransferFailureFundInsufficient = "fund_insufficient"
+)
 
 // InternalTransferList is the paginated internal-transfer list response.
 type InternalTransferList struct {
@@ -86,23 +100,27 @@ func (s *InternalTransferService) Create(ctx context.Context, params CreateInter
 		return nil, err
 	}
 
-	description := params.Description
-	metadata := params.Metadata
-	if metadata == nil {
-		metadata = map[string]any{}
+	currency, err := currencyOrDefault(params.Currency)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateMetadata(params.Metadata, false); err != nil {
+		return nil, err
 	}
 
 	body := map[string]any{
-		"amount":                      Amount{Currency: "SLE", Value: params.Amount},
+		"amount":                      Amount{Currency: string(currency), Value: params.Amount},
 		"sourceFinancialAccount":      map[string]any{"id": params.SourceAccount},
 		"destinationFinancialAccount": map[string]any{"id": params.DestinationAccount},
-		"description":                 description,
-		"metadata":                    metadata,
+	}
+	putIfSet(body, "description", params.Description)
+	if params.Metadata != nil {
+		body["metadata"] = params.Metadata
 	}
 
-	key, err := generateIdempotencyKey()
+	key, err := idempotencyKey(ctx)
 	if err != nil {
-		return nil, &Error{Message: err.Error()}
+		return nil, err
 	}
 
 	var out InternalTransfer
@@ -159,19 +177,18 @@ func (s *InternalTransferService) Retrieve(ctx context.Context, internalTransfer
 
 // Update applies a partial update to an internal transfer. The documented
 // PATCH /internal-transfers/{id} endpoint accepts the mutable fields
-// description and metadata. This method has no TypeScript SDK counterpart; it
-// is added from the official API documentation.
+// description (up to 255 characters) and metadata.
 func (s *InternalTransferService) Update(ctx context.Context, internalTransferID string, params map[string]any) (*InternalTransfer, error) {
 	if internalTransferID == "" {
 		return nil, newValidationError("internalTransferID is required")
 	}
-	if len(params) == 0 {
-		return nil, newValidationError("at least one field is required to update")
+	if err := validateUpdate(params, map[string]updateField{"description": {maxLen: 255}, "metadata": {}}); err != nil {
+		return nil, err
 	}
 
-	key, err := generateIdempotencyKey()
+	key, err := idempotencyKey(ctx)
 	if err != nil {
-		return nil, &Error{Message: err.Error()}
+		return nil, err
 	}
 
 	var out InternalTransfer

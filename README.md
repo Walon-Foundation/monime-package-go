@@ -40,7 +40,7 @@ func main() {
 	client, err := monime.New(
 		monime.WithSpaceID("your-space-id"),         // or env MONIME_SPACE_ID
 		monime.WithAccessToken("your-access-token"), // or env MONIME_ACCESS_TOKEN
-		monime.WithVersion(monime.Version20250823),  // optional, or env MONIME_VERSION
+		monime.WithVersion(monime.Version20250823),  // optional, or env MONIME_VERSION; defaults to the latest
 	)
 	if err != nil {
 		log.Fatal(err)
@@ -122,7 +122,7 @@ takes a `context.Context` first.
 | `client.CheckoutSession()` | `Create`, `List`, `Retrieve`, `Delete` |
 | `client.Receipt()` | `Retrieve`, `Redeem` |
 | `client.UssdOtp()` | `Create`, `Retrieve`, `List`, `Delete` |
-| `client.ProviderKyc()` | `Retrieve` |
+| `client.ProviderKyc()` | `Retrieve(ctx, providerID, accountID)` |
 | `client.Country()` | `Retrieve`, `List` |
 | `client.Webhook()` | `Create`, `Retrieve`, `List`, `Update`, `Delete` |
 | `client.FinancialProvider().Bank()` | `Retrieve`, `List` (country required) |
@@ -137,8 +137,29 @@ for _, p := range payouts.Result {
 	fmt.Println(p.ID, p.Status)
 }
 
-// Retrieve
-account, err := client.FinancialAccount().Retrieve(ctx, "fac-123")
+// Retrieve; the balance is included only when asked for
+account, err := client.FinancialAccount().Retrieve(ctx, "fac-123", monime.WithFinancialAccountBalance(true))
+
+// A payment code for SLE 25.00 (amounts are minor units)
+code, err := client.PaymentCode().Create(ctx, monime.CreatePaymentCodeParams{
+	Name:   "Order 1042",
+	Amount: &monime.Amount{Currency: "SLE", Value: 2500},
+})
+
+// A hosted checkout page with line items
+session, err := client.CheckoutSession().Create(ctx, monime.CreateCheckoutSessionParams{
+	Name:       "Order 1042",
+	Reference:  "order-1042",
+	SuccessURL: "https://example.com/paid",
+	LineItems: []monime.CheckoutSessionLineItemParams{
+		{Name: "Ticket", Price: monime.Amount{Value: 15000}, Quantity: 2},
+	},
+})
+fmt.Println(session.RedirectURL)
+
+// Who holds a mobile money number (the account id is required)
+kyc, err := client.ProviderKyc().Retrieve(ctx, "m17", "+23276123456")
+fmt.Println(kyc.Account.HolderName)
 
 // Partial update (PATCH)
 _, err = client.PaymentCode().Update(ctx, "pmc-123", map[string]any{
@@ -236,11 +257,62 @@ if err != nil {
 }
 ```
 
-## Amounts
+## Idempotency
+
+Every create call sends an `Idempotency-Key`. By default it is random, which
+protects nothing across retries. When you retry a request whose outcome you
+don't know (a timeout, a dropped connection), send the **same** key so Monime
+returns the first result instead of acting twice. Derive it from your own record
+with `IdempotencyKeyFor`, a UUIDv5 as the Monime docs recommend:
+
+```go
+ctx := monime.WithIdempotencyKey(ctx, monime.IdempotencyKeyFor("payout:"+lineID+":1"))
+payout, err := client.Payout().Create(ctx, monime.CreatePayoutParams{
+	Amount:        50000, // SLE 500.00
+	SourceAccount: "fac-123",
+	Destination:   monime.PayoutDestination{Type: "momo", ProviderID: monime.PayoutProviderOrangeMoney, PhoneNumber: "+23276123456"},
+	Metadata:      map[string]any{"line_id": lineID},
+})
+```
+
+Keys are 1 to 64 characters. A key reused with a different request gets a `409`
+with reason `idempotency_key_in_use`.
+
+## Webhooks
+
+Verify every delivery before acting on it. Pass the raw body, exactly as
+received, and the `Monime-Signature` header:
+
+```go
+body, _ := io.ReadAll(r.Body)
+event, err := monime.ParseWebhookEvent(body, r.Header.Get(monime.WebhookSignatureHeader),
+	monime.WebhookVerifyOptions{Secret: os.Getenv("MONIME_WEBHOOK_SECRET")}) // or PublicKeyPEM for ES256
+if err != nil {
+	http.Error(w, "invalid signature", http.StatusUnauthorized)
+	return
+}
+switch event.Event.Name {
+case monime.EventPayoutCompleted, monime.EventPayoutFailed:
+	// event.Data is a partial snapshot; fetch the payout by event.Object.ID
+}
+```
+
+HS256 webhooks are checked with their secret and ES256 webhooks with the PEM
+public key Monime generates (`VerificationMethod.PublicKey` on the webhook).
+Deliveries signed more than 5 minutes ago, or more than a minute ahead, are
+refused. Deliveries can repeat or arrive out of order: deduplicate on
+`event.Event.ID`.
+
+## Amounts and metadata
 
 Monetary values use the `monime.Amount` type (`Currency`, `Value`) where `Value`
-is in **minor units**. Some create helpers (e.g. payment codes) take a major-unit
-amount and convert it for you — see each method's documentation.
+is in **minor units**: SLE 25.00 is `Value: 2500`. Nothing is scaled for you.
+The currency defaults to `SLE`; `USD` is also supported.
+
+Metadata is a flat map of string values: at most 64 pairs, keys of up to 64
+characters from `[a-zA-Z0-9_-]` that don't start with `_`, `-` or `monime`, and
+values of up to 100 characters. On updates a `nil` or `""` value removes a key.
+Requests that break these rules fail validation before they are sent.
 
 ## Runnable examples
 
@@ -251,7 +323,7 @@ credentials are in the environment (see [Credentials & `.env`](#credentials--env
 go run ./examples/receipts <order-number>   # retrieve a receipt
 go run ./examples/payment_code              # create a payment code
 go run ./examples/payouts                   # create + list payouts
-go run ./examples/webhooks                  # register + list webhooks
+go run ./examples/webhooks                  # register a webhook and verify deliveries
 ```
 
 ## Development

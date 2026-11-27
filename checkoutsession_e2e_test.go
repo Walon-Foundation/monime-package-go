@@ -23,14 +23,18 @@ func TestCheckoutSession_Create(t *testing.T) {
 	c := newTestClient(t, srv)
 	got, err := c.CheckoutSession().Create(context.Background(), CreateCheckoutSessionParams{
 		Name:               "Order",
-		Amount:             1000,
-		Quantity:           2,
 		SuccessURL:         "https://example.com/success",
 		CancelURL:          "https://example.com/cancel",
 		Description:        "An order",
+		Reference:          "ord-1042",
 		FinancialAccountID: "fac-1",
-		PrimaryColor:       "#112233",
-		Images:             []string{"https://img/1.png"},
+		LineItems: []CheckoutSessionLineItemParams{
+			{Name: "Ticket", Price: Amount{Value: 1000}, Quantity: 2, Images: []string{"https://img/1.png"}},
+			{Name: "Lunch", Price: Amount{Currency: "SLE", Value: 500}},
+		},
+		PaymentOptions:  &CheckoutSessionPaymentOptions{Card: &CheckoutSessionCardOption{Disable: true}, Momo: &CheckoutSessionProviderOption{EnabledProviders: []string{"m17"}}},
+		BrandingOptions: &CheckoutSessionBrandingOptions{PrimaryColor: "#112233"},
+		Metadata:        map[string]any{"order_id": "1042"},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -52,39 +56,81 @@ func TestCheckoutSession_Create(t *testing.T) {
 	if gotBody["name"] != "Order" || gotBody["successUrl"] != "https://example.com/success" || gotBody["cancelUrl"] != "https://example.com/cancel" {
 		t.Errorf("unexpected top-level body: %+v", gotBody)
 	}
-	if gotBody["financialAccountId"] != "fac-1" {
-		t.Errorf("financialAccountId = %v", gotBody["financialAccountId"])
+	if gotBody["financialAccountId"] != "fac-1" || gotBody["reference"] != "ord-1042" {
+		t.Errorf("financialAccountId/reference = %v/%v", gotBody["financialAccountId"], gotBody["reference"])
 	}
-	if v, ok := gotBody["callbackState"]; !ok || v != nil {
-		t.Errorf("callbackState should be present and null, got %v (present=%v)", v, ok)
+	if _, present := gotBody["callbackState"]; present {
+		t.Errorf("callbackState should be omitted when unset, got %v", gotBody["callbackState"])
 	}
 
-	// line item: amount NOT scaled, currency SLE, type custom
+	// line items: amounts unscaled, currency defaulted to SLE, type custom
 	items, _ := gotBody["lineItems"].([]any)
-	if len(items) != 1 {
+	if len(items) != 2 {
 		t.Fatalf("lineItems = %v", gotBody["lineItems"])
 	}
-	item := items[0].(map[string]any)
-	if item["type"] != "custom" || item["quantity"].(float64) != 2 {
-		t.Errorf("unexpected line item: %+v", item)
+	first := items[0].(map[string]any)
+	if first["type"] != "custom" || first["quantity"].(float64) != 2 {
+		t.Errorf("unexpected line item: %+v", first)
 	}
-	price := item["price"].(map[string]any)
+	price := first["price"].(map[string]any)
 	if price["currency"] != "SLE" || price["value"].(float64) != 1000 {
 		t.Errorf("price = %+v, want SLE/1000 (unscaled)", price)
 	}
-
-	// nested option objects
-	po, _ := gotBody["paymentOptions"].(map[string]any)
-	if po == nil {
-		t.Fatalf("paymentOptions missing")
+	if _, present := items[1].(map[string]any)["quantity"]; present {
+		t.Error("quantity should be omitted when zero (the API defaults it to 1)")
 	}
-	bank := po["bank"].(map[string]any)
-	if bank["disable"].(bool) != false {
-		t.Errorf("bank.disable = %v", bank["disable"])
+
+	po, _ := gotBody["paymentOptions"].(map[string]any)
+	if card, _ := po["card"].(map[string]any); card["disable"] != true {
+		t.Errorf("paymentOptions = %v", po)
+	}
+	if _, present := po["bank"]; present {
+		t.Error("an option the caller did not set must be left to the API's default")
 	}
 	branding := gotBody["brandingOptions"].(map[string]any)
 	if branding["primaryColor"] != "#112233" {
 		t.Errorf("primaryColor = %v", branding["primaryColor"])
+	}
+}
+
+func TestCheckoutSession_Create_OmitsUnsetFields(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &gotBody)
+		_, _ = w.Write([]byte(`{"result":{"id":"cs_2"}}`))
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	if _, err := c.CheckoutSession().Create(context.Background(), CreateCheckoutSessionParams{
+		Name: "Order", LineItems: []CheckoutSessionLineItemParams{{Name: "Ticket", Price: Amount{Value: 1000}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// The body rejects unknown properties; an empty financialAccountId or a
+	// forced empty object is not what the caller asked for.
+	for _, k := range []string{"financialAccountId", "description", "reference", "successUrl", "cancelUrl", "paymentOptions", "brandingOptions", "metadata"} {
+		if _, present := gotBody[k]; present {
+			t.Errorf("%s should be omitted when unset, got %v", k, gotBody[k])
+		}
+	}
+}
+
+func TestCheckoutSession_Create_RejectsMixedCurrencies(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Error("server should not be called when validation fails")
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	if _, err := c.CheckoutSession().Create(context.Background(), CreateCheckoutSessionParams{
+		Name: "Order", LineItems: []CheckoutSessionLineItemParams{
+			{Name: "A", Price: Amount{Currency: "SLE", Value: 1}},
+			{Name: "B", Price: Amount{Currency: "USD", Value: 1}},
+		},
+	}); err == nil {
+		t.Fatal("expected validation error for line items in two currencies")
 	}
 }
 

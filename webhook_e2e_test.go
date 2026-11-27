@@ -26,7 +26,7 @@ func TestWebhook_Create(t *testing.T) {
 		URL:                "https://example.com/hook",
 		Events:             []string{"payment.succeeded"},
 		Enabled:            boolPtr(true),
-		VerificationMethod: &WebhookVerificationMethod{Type: "HS256", Secret: "supersecretvalue"},
+		VerificationMethod: &WebhookVerificationMethod{Type: "HS256", Secret: "whsec_0123456789abcdef0123456789abcdef"},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -51,7 +51,7 @@ func TestWebhook_Create(t *testing.T) {
 		t.Errorf("body enabled = %v", gotBody["enabled"])
 	}
 	vm, _ := gotBody["verificationMethod"].(map[string]any)
-	if vm["type"] != "HS256" || vm["secret"] != "supersecretvalue" {
+	if vm["type"] != "HS256" || vm["secret"] != "whsec_0123456789abcdef0123456789abcdef" {
 		t.Errorf("body verificationMethod = %v", gotBody["verificationMethod"])
 	}
 }
@@ -73,10 +73,14 @@ func TestWebhook_Create_OmitsEmptyOptionals(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	for _, k := range []string{"enabled", "apiRelease", "headers", "alertEmails", "verificationMethod", "metadata"} {
+	for _, k := range []string{"enabled", "headers", "alertEmails", "verificationMethod", "metadata"} {
 		if _, ok := gotBody[k]; ok {
 			t.Errorf("%s should be omitted when empty", k)
 		}
+	}
+	// apiRelease is required by POST /v1/webhooks, so its default is sent.
+	if gotBody["apiRelease"] != "caph" {
+		t.Errorf("apiRelease = %v, want the default caph", gotBody["apiRelease"])
 	}
 }
 
@@ -206,5 +210,34 @@ func TestWebhook_Delete_RequiresID(t *testing.T) {
 	c := newTestClient(t, httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
 	if err := c.Webhook().Delete(context.Background(), ""); err == nil {
 		t.Fatal("expected error for empty id")
+	}
+}
+
+func TestWebhook_Create_SendsAPIReleaseAndES256WithoutSecret(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &gotBody)
+		_, _ = w.Write([]byte(`{"result":{"id":"whk-1","apiRelease":"caph","verificationMethod":{"type":"ES256","publicKey":"-----BEGIN PUBLIC KEY-----\nMFkw\n-----END PUBLIC KEY-----\n"}}}`))
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	got, err := c.Webhook().Create(context.Background(), CreateWebhookParams{
+		Name: "payouts", URL: "https://example.com/hook", Events: []string{"payout.completed", "payout.failed"},
+		VerificationMethod: &WebhookVerificationMethod{Type: WebhookVerificationES256, PublicKey: "ignored on create"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotBody["apiRelease"] != "caph" {
+		t.Errorf("apiRelease = %v; the API requires it", gotBody["apiRelease"])
+	}
+	vm, _ := gotBody["verificationMethod"].(map[string]any)
+	if len(vm) != 1 || vm["type"] != "ES256" {
+		t.Errorf("ES256 must be sent as {type} only, got %v", vm)
+	}
+	if got.VerificationMethod.PublicKey == "" {
+		t.Error("the PEM public key in the response should be decoded")
 	}
 }

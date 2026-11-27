@@ -43,13 +43,13 @@ func TestReceipt_Redeem(t *testing.T) {
 		gotMethod, gotPath, gotIdem = r.Method, r.URL.Path, r.Header.Get("Idempotency-Key")
 		raw, _ := io.ReadAll(r.Body)
 		_ = json.Unmarshal(raw, &gotBody)
-		_, _ = w.Write([]byte(`{"result":{"orderNumber":"ord_9","status":"fully_redeemed"}}`))
+		_, _ = w.Write([]byte(`{"result":{"redeem":true,"receipt":{"orderNumber":"ord_9","status":"fully_redeemed"}}}`))
 	}))
 	defer srv.Close()
 
 	c := newTestClient(t, srv)
-	got, err := c.Receipt().Redeem(context.Background(), "ord_9", map[string]any{
-		"entitlements": []map[string]any{{"key": "ticket", "units": 1}},
+	got, err := c.Receipt().Redeem(context.Background(), "ord_9", RedeemReceiptParams{
+		Entitlements: []ReceiptRedemptionItem{{Key: "ticket", Units: 1}},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -60,7 +60,8 @@ func TestReceipt_Redeem(t *testing.T) {
 	if gotIdem == "" {
 		t.Error("expected Idempotency-Key header")
 	}
-	if got.Status != "fully_redeemed" {
+	// The API wraps the receipt: {"redeem": bool, "receipt": {...}}.
+	if !got.Redeem || got.Receipt.Status != ReceiptStatusFullyRedeemed || got.Receipt.OrderNumber != "ord_9" {
 		t.Fatalf("unexpected response: %+v", got)
 	}
 	ents, _ := gotBody["entitlements"].([]any)

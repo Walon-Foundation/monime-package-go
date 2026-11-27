@@ -22,11 +22,13 @@ func TestPaymentCode_Create(t *testing.T) {
 
 	c := newTestClient(t, srv)
 	got, err := c.PaymentCode().Create(context.Background(), CreatePaymentCodeParams{
-		PaymentName:        "Test Payment",
-		Amount:             100,
-		FinancialAccountID: "fac-1",
-		Name:               "John Doe",
-		PhoneNumber:        "076000000",
+		Name:                  "Test Payment",
+		Amount:                &Amount{Value: 10000},
+		FinancialAccountID:    "fac-1",
+		CustomerName:          "John Doe",
+		AuthorizedPhoneNumber: "+23276000000",
+		Reference:             "ord-1",
+		Metadata:              map[string]any{"order_id": "ord-1"},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -40,16 +42,69 @@ func TestPaymentCode_Create(t *testing.T) {
 	if gotIdem == "" {
 		t.Error("expected Idempotency-Key header")
 	}
-	// amount must be converted to minor units (100 -> 10000) and account id forwarded.
+	// The amount is already in minor units and is sent as-is; the currency
+	// defaults to SLE.
 	amount, _ := gotBody["amount"].(map[string]any)
-	if amount["value"].(float64) != 10000 {
-		t.Errorf("amount.value = %v, want 10000", amount["value"])
+	if amount["value"].(float64) != 10000 || amount["currency"] != "SLE" {
+		t.Errorf("amount = %v, want SLE 10000", amount)
 	}
-	if gotBody["financialAccountId"] != "fac-1" {
-		t.Errorf("financialAccountId = %v", gotBody["financialAccountId"])
+	if gotBody["financialAccountId"] != "fac-1" || gotBody["reference"] != "ord-1" || gotBody["authorizedPhoneNumber"] != "+23276000000" {
+		t.Errorf("body = %v", gotBody)
 	}
-	if gotBody["mode"] != "recurrent" {
-		t.Errorf("mode = %v", gotBody["mode"])
+	if customer, _ := gotBody["customer"].(map[string]any); customer["name"] != "John Doe" {
+		t.Errorf("customer = %v", gotBody["customer"])
+	}
+	// Nothing the caller left out is forced: the API defaults mode to one_time,
+	// enable to true and duration to 10m.
+	for _, k := range []string{"mode", "enable", "duration", "recurrentPaymentTarget", "authorizedProviders"} {
+		if _, present := gotBody[k]; present {
+			t.Errorf("%s should be omitted when unset, got %v", k, gotBody[k])
+		}
+	}
+}
+
+func TestPaymentCode_Create_Recurrent(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &gotBody)
+		_, _ = w.Write([]byte(`{"result":{"id":"pc_3","mode":"recurrent"}}`))
+	}))
+	defer srv.Close()
+
+	enable := false
+	c := newTestClient(t, srv)
+	if _, err := c.PaymentCode().Create(context.Background(), CreatePaymentCodeParams{
+		Name: "Dues", Mode: PaymentCodeModeRecurrent, Enable: &enable, Duration: "1h30m",
+		AuthorizedProviders:    []string{"m18"},
+		RecurrentPaymentTarget: &PaymentCodeRecurrentTarget{ExpectedPaymentCount: 3, ExpectedPaymentTotal: &Amount{Currency: "USD", Value: 900}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	target, _ := gotBody["recurrentPaymentTarget"].(map[string]any)
+	total, _ := target["expectedPaymentTotal"].(map[string]any)
+	if gotBody["mode"] != "recurrent" || gotBody["enable"] != false || gotBody["duration"] != "1h30m" ||
+		target["expectedPaymentCount"] != float64(3) || total["currency"] != "USD" || total["value"] != float64(900) {
+		t.Errorf("body = %v", gotBody)
+	}
+}
+
+func TestPaymentCode_Create_TargetNeedsRecurrentMode(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Error("server should not be called when validation fails")
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	if _, err := c.PaymentCode().Create(context.Background(), CreatePaymentCodeParams{
+		Name: "Dues", RecurrentPaymentTarget: &PaymentCodeRecurrentTarget{ExpectedPaymentCount: 2},
+	}); err == nil {
+		t.Fatal("expected validation error for a target on a one_time code")
+	}
+	if _, err := c.PaymentCode().Create(context.Background(), CreatePaymentCodeParams{
+		Name: "Dues", Amount: &Amount{Value: 0},
+	}); err == nil {
+		t.Fatal("expected validation error for a zero amount")
 	}
 }
 
@@ -64,7 +119,7 @@ func TestPaymentCode_Create_OmitsEmptyAccount(t *testing.T) {
 
 	c := newTestClient(t, srv)
 	if _, err := c.PaymentCode().Create(context.Background(), CreatePaymentCodeParams{
-		PaymentName: "P", Amount: 5, Name: "N", PhoneNumber: "076",
+		Name: "Pay", Amount: &Amount{Value: 500},
 	}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -80,7 +135,7 @@ func TestPaymentCode_Create_ValidationShortCircuits(t *testing.T) {
 	defer srv.Close()
 
 	c := newTestClient(t, srv)
-	_, err := c.PaymentCode().Create(context.Background(), CreatePaymentCodeParams{PaymentName: ""})
+	_, err := c.PaymentCode().Create(context.Background(), CreatePaymentCodeParams{Name: ""})
 	if err == nil {
 		t.Fatal("expected validation error")
 	}
@@ -157,11 +212,14 @@ func TestPaymentCode_Update(t *testing.T) {
 
 func TestPaymentCode_Update_Validation(t *testing.T) {
 	c := newTestClient(t, httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
-	if _, err := c.PaymentCode().Update(context.Background(), "", map[string]any{"a": 1}); err == nil {
+	if _, err := c.PaymentCode().Update(context.Background(), "", map[string]any{"enable": true}); err == nil {
 		t.Fatal("expected error for empty id")
 	}
 	if _, err := c.PaymentCode().Update(context.Background(), "pc_1", nil); err == nil {
 		t.Fatal("expected error for empty params")
+	}
+	if _, err := c.PaymentCode().Update(context.Background(), "pc_1", map[string]any{"mode": "recurrent"}); err == nil {
+		t.Fatal("expected error for a field PATCH /payment-codes/{id} does not accept")
 	}
 }
 

@@ -68,7 +68,7 @@ func TestInternalTransfer_Create(t *testing.T) {
 	}
 }
 
-func TestInternalTransfer_Create_DefaultsEmptyDescriptionAndMetadata(t *testing.T) {
+func TestInternalTransfer_Create_OmitsUnsetFieldsAndSendsCurrency(t *testing.T) {
 	var gotBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
@@ -79,16 +79,33 @@ func TestInternalTransfer_Create_DefaultsEmptyDescriptionAndMetadata(t *testing.
 
 	c := newTestClient(t, srv)
 	if _, err := c.InternalTransfer().Create(context.Background(), CreateInternalTransferParams{
-		SourceAccount: "acc_1", DestinationAccount: "acc_2", Amount: 5,
+		SourceAccount: "acc_1", DestinationAccount: "acc_2", Amount: 5, Currency: CurrencyUSD,
 	}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if gotBody["description"] != "" {
-		t.Errorf("description = %v, want empty string", gotBody["description"])
+	// description and metadata are nullable and optional; sending "" or {} is
+	// not what the caller asked for.
+	for _, k := range []string{"description", "metadata"} {
+		if _, present := gotBody[k]; present {
+			t.Errorf("%s should be omitted when unset, got %v", k, gotBody[k])
+		}
 	}
-	meta, ok := gotBody["metadata"].(map[string]any)
-	if !ok || len(meta) != 0 {
-		t.Errorf("metadata = %v, want empty object", gotBody["metadata"])
+	if amount, _ := gotBody["amount"].(map[string]any); amount["currency"] != "USD" {
+		t.Errorf("amount = %v, want currency USD", gotBody["amount"])
+	}
+}
+
+func TestInternalTransfer_Create_RejectsUnsupportedCurrency(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Error("server should not be called when validation fails")
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	if _, err := c.InternalTransfer().Create(context.Background(), CreateInternalTransferParams{
+		SourceAccount: "acc_1", DestinationAccount: "acc_2", Amount: 5, Currency: "EUR",
+	}); err == nil {
+		t.Fatal("expected validation error for EUR")
 	}
 }
 

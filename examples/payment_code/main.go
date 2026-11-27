@@ -29,12 +29,14 @@ func main() {
 
 	ctx := context.Background()
 
+	// SLE 200.00 is 20000 in minor units. Mode, enable and duration are left to
+	// the API's defaults (one_time, enabled, 10 minutes).
 	code, err := client.PaymentCode().Create(ctx, monime.CreatePaymentCodeParams{
-		PaymentName:        "walon",
-		Amount:             200,
-		Name:               "walon",
-		PhoneNumber:        "070000000",
-		FinancialAccountID: "hellloo",
+		Name:                  "Walon order 1042",
+		Amount:                &monime.Amount{Currency: monime.CurrencySLE.String(), Value: 20000},
+		CustomerName:          "Walon",
+		AuthorizedPhoneNumber: "+23276000000",
+		Reference:             "order-1042",
 	})
 	if err != nil {
 		var apiErr *monime.Error

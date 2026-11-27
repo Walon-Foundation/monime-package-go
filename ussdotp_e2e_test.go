@@ -131,3 +131,32 @@ func TestUssdOtp_Delete_RequiresID(t *testing.T) {
 		t.Fatal("expected error for empty id")
 	}
 }
+
+func TestUssdOtp_Create_SendsOptionalFields(t *testing.T) {
+	var bodies []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &body)
+		bodies = append(bodies, body)
+		_, _ = w.Write([]byte(`{"result":{"id":"otp-1","status":"pending","dialCode":"*715*1#"}}`))
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	if _, err := c.UssdOtp().Create(context.Background(), CreateUssdOtpParams{
+		AuthorizedPhoneNumber: "+23276123456", VerificationMessage: "Confirm your check-in", Duration: "3m",
+		Metadata: map[string]any{"meeting": "m-1"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.UssdOtp().Create(context.Background(), CreateUssdOtpParams{AuthorizedPhoneNumber: "+23276123456"}); err != nil {
+		t.Fatal(err)
+	}
+	if bodies[0]["verificationMessage"] != "Confirm your check-in" || bodies[0]["duration"] != "3m" {
+		t.Errorf("first body = %v", bodies[0])
+	}
+	if len(bodies[1]) != 1 {
+		t.Errorf("unset fields must be omitted, got %v", bodies[1])
+	}
+}
